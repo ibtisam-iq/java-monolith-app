@@ -2,6 +2,8 @@
 
 The folder structure follows standard Spring Boot conventions with a focus on a 2-tier architecture:
 
+> **Note:** This is quite lenghty file, you can read its short version [here](dockerization.md).
+
 ## Project Folder Structure
 
 ### 1. Root Directory
