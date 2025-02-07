@@ -68,7 +68,7 @@ version: '3'
 services:
   web:
     build: .
-    container_name: bg-web
+    container_name: bank-web
     command: java -jar /usr/src/app/app.jar
     ports:
       - "8080:8080"
