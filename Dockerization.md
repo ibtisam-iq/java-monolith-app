@@ -4,6 +4,29 @@ The folder structure follows standard Spring Boot conventions with a focus on a 
 
 > **Note:** This is quite lenghty file, you can read its short version [here](dockerization.md).
 
+## Table of Contents
+- [Project Folder Structure](#project-folder-structure)
+  - [1. Root Directory](#1-root-directory)
+  - [2. src/main/java/com/example/bankapp/ (Application Code)](#2-srcmainjavacomexamplebankapp-application-code)
+    - [Core Components](#core-components)
+    - [Detailed Explanation](#detailed-explanation)
+  - [3. src/main/resources/ (Configuration & Static Assets)](#3-srcmainresources-configuration--static-assets)
+  - [4. src/test/java/com/example/bankapp/ (Testing)](#4-srctestjavacomexamplebankapp-testing)
+- [Request Flow](#request-flow)
+- [Understanding 2-Tier vs. 3-Tier Architecture](#understanding-2-tier-vs-3-tier-architecture)
+  - [1. Architecture Description](#1-architecture-description)
+  - [2. Evaluating Your Java Banking App](#2-evaluating-your-java-banking-app)
+  - [3. Is This Truly a 3-Tier Architecture?](#3-is-this-truly-a-3-tier-architecture)
+  - [4. Comparing 3-Tier in Different Tech Stacks](#4-comparing-3-tier-in-different-tech-stacks)
+  - [5. How to Convert This into a 3-Tier Application?](#5-how-to-convert-this-into-a-3-tier-application)
+- [Dockerizing a 2-Tier Java Application](#dockerizing-a-2-tier-java-application)
+  - [Case 1: All-in-One Image with Maven](#case-1-all-in-one-image-with-maven)
+  - [Case 2: Pre-built JAR Image](#case-2-pre-built-jar-image)
+  - [Case 3: Maven-Based Build in Container](#case-3-maven-based-build-in-container)
+  - [Case 4: Multi-Stage Build (Optimized for Production)](#case-4-multi-stage-build-optimized-for-production)
+- [Using Docker Compose for Deployment](#using-docker-compose-for-deployment)
+- [Final Recommendations](#final-recommendations)
+
 ## Project Folder Structure
 
 ### 1. Root Directory
