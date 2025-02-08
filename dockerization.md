@@ -69,30 +69,50 @@ services:
   web:
     build: .
     container_name: bank-web
-    command: java -jar /usr/src/app/app.jar
     ports:
       - "8080:8080"
     environment:
-      - DATABASE_URL=jdbc:mysql://db:3306/bankingdb
-      - DATABASE_USERNAME=root
-      - DATABASE_PASSWORD=yourpassword
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/bankappdb?useSSL=false&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: ibtisam
+      SPRING_DATASOURCE_PASSWORD: Ibtisam
+    depends_on:
+      db:
+        condition: service_healthy   # Wait for MySQL to be healthy before starting the app
+    networks:
+      - app-network  
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
       interval: 30s
       timeout: 10s
       retries: 3
   db:
-    image: mysql:8.0
+    image: mysql:latest
     environment:
-      - MYSQL_ROOT_PASSWORD=yourpassword
-      - MYSQL_DATABASE=bankingdb
+      MYSQL_ROOT_PASSWORD: IbtisamOps
+      MYSQL_DATABASE: bankappdb
+      MYSQL_USER: ibtisam 
+      MYSQL_PASSWORD: ibtisam
+
     ports:
       - "3306:3306"
+
+    volumes:
+      - mysql_data:/var/lib/mysql     # Persist MySQL data
+    networks:
+      - app-network
+
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
       interval: 30s
       timeout: 10s
       retries: 3
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  mysql_data:      
 ```
 
 ### Commands to Run the Project
