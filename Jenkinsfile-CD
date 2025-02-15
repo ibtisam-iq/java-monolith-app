@@ -1,0 +1,25 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/ibtisam-iq/BankingApp-Java-MySQL.git'
+            }
+        }
+        
+        stage('Kubernetes Deployment') {
+            steps {
+                dir ('manifest/') {
+                    withKubeConfig(caCertificate: '', clusterName: 'IbtisamX-cluster', contextName: '', credentialsId: 'k8-token', namespace: 'IbtisamX', restrictKubeConfigAccess: false, serverUrl: 'https://952FB702C508F688D873376083B31DF5.gr7.ap-south-1.eks.amazonaws.com') {
+                        sh "kubectl apply -f manifest.yaml -n IbtisamX"
+                        sh "kubectl apply -f HPA.yaml "
+                        sleep 30
+                        sh "kubectl get pods -n IbtisamX"
+                        sh "kubectl get service -n IbtisamX"
+                    }    
+                }
+            }
+        }
+    }
+}

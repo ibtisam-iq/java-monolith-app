@@ -1,77 +1,115 @@
 <?xml version="1.0" encoding="UTF-8"?>  
+
+<!-- The root element of a Maven project configuration file -->
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+
+    <!-- modelVersion: Defines the POM model version. Always set to 4.0.0 for Maven 2+ projects -->
 	<modelVersion>4.0.0</modelVersion>
+
+    <!-- Parent section: Specifies that this project inherits settings from a parent POM (Spring Boot Starter Parent in this case) -->
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
 		<version>3.3.3</version>
-		<relativePath/> <!-- lookup parent from repository -->
+		<relativePath/> <!-- If empty, Maven will look up the parent in repositories -->
 	</parent>
-	<groupId>com.example</groupId>
-	<artifactId>bankapp</artifactId>
+
+    <!-- Group ID: Specifies the unique identifier for the project's group or organization.
+        Typically represents a domain or company name in reverse format. 
+	-->
+	<groupId>com.ibtisam-iq</groupId>
+    
+    <!-- artifactId: The name of your project; used to generate JAR/WAR file names -->
+	<artifactId>IbtisamXbankapp</artifactId>
+    
+    <!-- version: Defines the version of the project. 'SNAPSHOT' indicates a work-in-progress build -->
 	<version>0.0.1-SNAPSHOT</version>
-	<name>bankapp</name>
+    
+    <!-- name: The project's display name -->
+	<name>IbtisamXbankapp</name>
+    
+    <!-- description: A brief summary of the project -->
 	<description>Banking Web Application</description>
+
+    <!-- url: Can contain the project homepage or repository link (currently empty) -->
 	<url/>
+
+    <!-- Licenses: Used to specify the licensing information of the project (currently empty) -->
 	<licenses>
 		<license/>
 	</licenses>
+
+    <!-- Developers: Defines project contributors (currently empty) -->
 	<developers>
 		<developer/>
 	</developers>
+
+    <!-- Source Control Management (SCM): Defines version control system details (e.g., GitHub, GitLab) -->
 	<scm>
 		<connection/>
 		<developerConnection/>
 		<tag/>
 		<url/>
 	</scm>
+
+    <!-- Properties: Used to define custom variables that can be used across the POM -->
 	<properties>
-		<java.version>17</java.version>
-		<jacoco.version>0.8.7</jacoco.version>
+		<java.version>17</java.version> <!-- Specifies the Java version used -->
+		<jacoco.version>0.8.7</jacoco.version> <!-- Specifies the version of JaCoCo for code coverage -->
    		<sonar.java.coveragePlugin>jacoco</sonar.java.coveragePlugin>
     		<sonar.dynamicAnalysis>reuseReports</sonar.dynamicAnalysis>
     		<sonar.jacoco.reportPath>${project.basedir}/../target/jacoco.exec</sonar.jacoco.reportPath>
     		<sonar.language>java</sonar.language>
 	</properties>
+
+    <!-- Dependencies: External libraries required by the project -->
 	<dependencies>
+		<!-- Spring Boot JPA for database interactions -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
 		</dependency>
+		<!-- Spring Boot Security for authentication and authorization -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security</artifactId>
 		</dependency>
+		<!-- Thymeleaf templating engine -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-thymeleaf</artifactId>
 		</dependency>
+		<!-- Spring Boot Web for building REST APIs and MVC applications -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
 		</dependency>
+		<!-- Thymeleaf extras for Spring Security integration -->
 		<dependency>
 			<groupId>org.thymeleaf.extras</groupId>
 			<artifactId>thymeleaf-extras-springsecurity6</artifactId>
 		</dependency>
-
+		<!-- MySQL database connector -->
 		<dependency>
 			<groupId>mysql</groupId>
 			<artifactId>mysql-connector-java</artifactId>
 			<version>8.0.33</version>
 			<scope>runtime</scope>
 		</dependency>
+		<!-- JaCoCo code coverage tool -->
 		<dependency>
-    <groupId>org.jacoco</groupId> 
-    <artifactId>jacoco-maven-plugin</artifactId>
-    <version>0.8.7</version>
-</dependency>
+    		<groupId>org.jacoco</groupId> 
+    		<artifactId>jacoco-maven-plugin</artifactId>
+    		<version>0.8.7</version>
+		</dependency>
+		<!-- Unit testing dependencies -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+		<!-- Spring Security testing utilities -->
 		<dependency>
 			<groupId>org.springframework.security</groupId>
 			<artifactId>spring-security-test</artifactId>
@@ -79,12 +117,15 @@
 		</dependency>
 	</dependencies>
 
+    <!-- Build configuration: Specifies plugins used during the build process -->
 	<build>
 		<plugins>
+			<!-- Plugin to package and run Spring Boot applications -->
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
+			<!-- Plugin for generating code coverage reports using JaCoCo -->
 			<plugin>
             <groupId>org.jacoco</groupId>
             <artifactId>jacoco-maven-plugin</artifactId>
@@ -105,21 +146,17 @@
             </executions>
         </plugin>
 		</plugins>
-
-	
 	</build>
 
-		<distributionManagement>
+    <!-- Distribution Management: Defines locations for deploying artifacts -->
+    <distributionManagement>
         <repository>
-  <id>devshack-maven</id>
-  <url>https://pkgs.dev.azure.com/devopsshack1/00e43ab1-00ba-4bf7-9bd4-d333617efea4/_packaging/devshack-maven/maven/v1</url>
-  <releases>
-    <enabled>true</enabled>
-  </releases>
-  <snapshots>
-    <enabled>true</enabled>
-  </snapshots>
-</repository>
+            <id>maven-releases</id>
+            <url>NEXUS-URL/repository/maven-releases/</url>
+        </repository>
+        <snapshotRepository>
+            <id>maven-snapshots</id>
+            <url>NEXUS-URL/repository/maven-snapshots/</url>
+        </snapshotRepository>
     </distributionManagement>
-
 </project>

@@ -63,10 +63,10 @@ Query OK, 0 rows affected (2.02 sec)
 mysql> ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'Test@123';
 Query OK, 0 rows affected (0.32 sec)
 
-mysql> ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'IbtisamOps'
-	-> ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'IbtisamOps';
+mysql> ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'IbtisamX'
+	-> ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'IbtisamX';
 ERROR 1064 (42000): You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'IbtisamO' at line 2
-mysql> ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'IbtisamOps';
+mysql> ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'IbtisamX';
 Query OK, 0 rows affected (1.07 sec)
 
 mysql> FLUSH PRIVILEGES;
@@ -255,3 +255,67 @@ mysql> show databases;
 
 mysql>
 
+------------------------------------------------------------------------------------------
+
+ibtisam@mint-dell:/media/ibtisam/L-Mint/git/Projects/BankingApp-Java-MySQL$ docker compose up -d --build
+[+] Building 219.2s (17/17) FINISHED                                                                                                                docker:desktop-linux
+ => [web internal] load build definition from Dockerfile                                                                                                            0.2s
+ => => transferring dockerfile: 692B                                                                                                                                0.0s
+ => [web internal] load metadata for docker.io/library/openjdk:17-jdk-alpine                                                                                        3.8s
+ => [web internal] load metadata for docker.io/library/maven:3.9.9-eclipse-temurin-17-alpine                                                                        6.0s
+ => [web auth] library/maven:pull token for registry-1.docker.io                                                                                                    0.0s
+ => [web auth] library/openjdk:pull token for registry-1.docker.io                                                                                                  0.0s
+ => [web internal] load .dockerignore                                                                                                                               0.2s
+ => => transferring context: 2B                                                                                                                                     0.0s
+ => [web ibtisamx 1/6] FROM docker.io/library/maven:3.9.9-eclipse-temurin-17-alpine@sha256:9b80f7a94c80472f846a6849eb49007ffa8b20a9eb40e8b3b366880f4fafb5b3        91.2s
+ => => resolve docker.io/library/maven:3.9.9-eclipse-temurin-17-alpine@sha256:9b80f7a94c80472f846a6849eb49007ffa8b20a9eb40e8b3b366880f4fafb5b3                      0.4s
+ => => sha256:9b80f7a94c80472f846a6849eb49007ffa8b20a9eb40e8b3b366880f4fafb5b3 1.40kB / 1.40kB                                                                      0.0s
+ => => sha256:e068f48ada7ce45e1ad794eb5149edc9bf1bb02cb48f0b019dd69f8e30f478bd 2.91kB / 2.91kB                                                                      0.0s
+ => => sha256:1810170af99d9d574b6bb1b8c028b185c437206c1bc0c7d279c0d95ceee2b7b1 7.49kB / 7.49kB                                                                      0.0s
+ => => sha256:005dedaf12fb87fde98fc3799c94d82baad509672097fa595795ade7db4dbb8f 20.95MB / 20.95MB                                                                   24.6s
+ => => sha256:b7b93bccf647f23c56b988b134e0f24ce8aed01ba9162e974330b45abc9f2b21 143.72MB / 143.72MB                                                                 71.8s
+ => => sha256:f18232174bc91741fdf3da96d85011092101a032a93a388b79e99e69c2d5c870 3.64MB / 3.64MB                                                                      5.2s
+ => => extracting sha256:f18232174bc91741fdf3da96d85011092101a032a93a388b79e99e69c2d5c870                                                                           0.5s
+ => => sha256:c444d2c2cdf16cd81d9bded68ea50c3e23f3bdfb487b1e8eee9d03a206c05142 131B / 131B                                                                          6.9s
+ => => sha256:76c67efadec52153c3e21caad3dc817dc99704b643bec8d9324830842d5d29b6 2.28kB / 2.28kB                                                                      8.3s
+ => => sha256:26a2e4f4cd2d56199bbc69ebb7b00c0cdc8a907a36b1e700157a1e50b45b03bc 3.39MB / 3.39MB                                                                     14.1s
+ => => sha256:ef6bc52c9e2af261e8ef4f08423884850cd4eda0630e5912743686eefd621640 9.17MB / 9.17MB                                                                     24.1s
+ => => sha256:2428c6a81820617a3d4b510e9f87c3f51d8f22f2c774e788090add2784f3a917 858B / 858B                                                                         26.4s
+ => => sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1 32B / 32B                                                                           26.8s
+ => => extracting sha256:005dedaf12fb87fde98fc3799c94d82baad509672097fa595795ade7db4dbb8f                                                                           1.3s
+ => => sha256:67c18cb01e3aa6d280df4129c6cf17c70ebb2a697330ec751e8b1b61db70d258 154B / 154B                                                                         27.7s
+ => => extracting sha256:b7b93bccf647f23c56b988b134e0f24ce8aed01ba9162e974330b45abc9f2b21                                                                           6.3s
+ => => extracting sha256:c444d2c2cdf16cd81d9bded68ea50c3e23f3bdfb487b1e8eee9d03a206c05142                                                                           0.0s
+ => => extracting sha256:76c67efadec52153c3e21caad3dc817dc99704b643bec8d9324830842d5d29b6                                                                           0.0s
+ => => extracting sha256:26a2e4f4cd2d56199bbc69ebb7b00c0cdc8a907a36b1e700157a1e50b45b03bc                                                                           0.3s
+ => => extracting sha256:ef6bc52c9e2af261e8ef4f08423884850cd4eda0630e5912743686eefd621640                                                                           0.4s
+ => => extracting sha256:2428c6a81820617a3d4b510e9f87c3f51d8f22f2c774e788090add2784f3a917                                                                           0.0s
+ => => extracting sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1                                                                           0.0s
+ => => extracting sha256:67c18cb01e3aa6d280df4129c6cf17c70ebb2a697330ec751e8b1b61db70d258                                                                           0.0s
+ => [web internal] load build context                                                                                                                               0.6s
+ => => transferring context: 49.08kB                                                                                                                                0.3s
+ => [web stage-1 1/3] FROM docker.io/library/openjdk:17-jdk-alpine@sha256:4b6abae565492dbe9e7a894137c966a7485154238902f2f25e9dbd9784383d81                          0.0s
+ => [web ibtisamx 2/6] WORKDIR /usr/src/app                                                                                                                         5.8s
+ => [web ibtisamx 3/6] COPY pom.xml .                                                                                                                               1.2s
+ => [web ibtisamx 4/6] RUN mvn dependency:resolve  # Better caching than dependency:go-offline                                                                     70.3s
+ => [web ibtisamx 5/6] COPY src ./src                                                                                                                               1.3s
+ => [web ibtisamx 6/6] RUN mvn clean package -DskipTests                                                                                                           35.1s
+ => CACHED [web stage-1 2/3] WORKDIR /usr/src/app                                                                                                                   0.0s
+ => [web stage-1 3/3] COPY --from=IbtisamX /usr/src/app/target/*.jar app.jar                                                                                        2.2s
+ => [web] exporting to image                                                                                                                                        1.6s
+ => => exporting layers                                                                                                                                             1.2s
+ => => writing image sha256:c0b63d30d744b557eb47c3c6a72984721951e921d4587503dfc7286bc17fc599                                                                        0.0s
+ => => naming to docker.io/library/ibtisamx-bankapp                                                                                                                 0.1s
+[+] Running 4/4
+ ✔ Network bankingapp-java-mysql_app-network  Created                                                                                                               0.7s 
+ ✔ Volume "bankingapp-java-mysql_mysql_data"  Created                                                                                                               0.1s 
+ ✔ Container mysql-db                         Healthy                                                                                                              98.1s 
+ ✔ Container bank-web                         Started                                                                                                              96.7s 
+ibtisam@mint-dell:/media/ibtisam/L-Mint/git/Projects/BankingApp-Java-MySQL$ docker compose down
+[+] Running 3/3
+ ✔ Container bank-web                         Removed                                                                                                               1.6s 
+ ✔ Container mysql-db                         Removed                                                                                                               3.2s 
+ ✔ Network bankingapp-java-mysql_app-network  Removed                                                                                                               0.7s 
+ibtisam@mint-dell:/media/ibtisam/L-Mint/git/Projects/BankingApp-Java-MySQL$ 
+
+-------------------------------------------------------

@@ -88,7 +88,7 @@ services:
   db:
     image: mysql:latest
     environment:
-      MYSQL_ROOT_PASSWORD: IbtisamOps
+      MYSQL_ROOT_PASSWORD: IbtisamX
       MYSQL_DATABASE: bankappdb
       MYSQL_USER: ibtisam 
       MYSQL_PASSWORD: ibtisam
