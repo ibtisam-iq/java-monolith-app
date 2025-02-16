@@ -4,19 +4,23 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: mysql-secret
-  namespace: webapps
+  namespace: ibtisamx
 type: Opaque
 data:
-  MYSQL_ROOT_PASSWORD: VGVzdEAxMjM= # Base64-encoded password
+  MYSQL_ROOT_PASSWORD: SWJ0aXNhbVg= # echo -n 'IbtisamX' | base64
+
+
 ---
 # ConfigMap for MySQL
 apiVersion: v1
 kind: ConfigMap
 metadata:
   name: mysql-config
-  namespace: webapps
+  namespace: ibtisamx
 data:
-  MYSQL_DATABASE: "bankappdb"
+  MYSQL_DATABASE: "IbtisamXbankappdb"
+
+
 ---
 # Storage Class for EBS
 apiVersion: storage.k8s.io/v1
@@ -29,13 +33,15 @@ parameters:
   fsType: ext4
 reclaimPolicy: Retain
 volumeBindingMode: WaitForFirstConsumer
+
+
 ---
 # Persistent Volume Claim for MySQL
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: mysql-pvc
-  namespace: webapps
+  namespace: ibtisamx
 spec:
   accessModes:
     - ReadWriteOnce
@@ -43,13 +49,15 @@ spec:
   resources:
     requests:
       storage: 5Gi
+
+
 ---
 # MySQL Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mysql
-  namespace: webapps
+  namespace: ibtisamx
 spec:
   selector:
     matchLabels:
@@ -102,26 +110,30 @@ spec:
       - name: mysql-data
         persistentVolumeClaim:
           claimName: mysql-pvc
+
+
 ---
 # MySQL Service
 apiVersion: v1
 kind: Service
 metadata:
   name: mysql-service
-  namespace: webapps
+  namespace: ibtisamx
 spec:
   ports:
   - port: 3306
     targetPort: 3306
   selector:
     app: mysql
+
+
 ---
 # BankApp Deployment
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: bankapp
-  namespace: webapps
+  namespace: ibtisamx
 spec:
   replicas: 1
   selector:
@@ -134,7 +146,7 @@ spec:
     spec:
       containers:
       - name: bankapp
-        image: adijaiswal/bankapp:v20
+        image: mibtisam/bankingapp-java-mysql:latest
         resources:
           requests:
             memory: "256Mi"
@@ -143,10 +155,10 @@ spec:
             memory: "512Mi"
             cpu: "500m"
         ports:
-        - containerPort: 8080
+        - containerPort: 8000
         env:
         - name: SPRING_DATASOURCE_URL
-          value: jdbc:mysql://mysql-service:3306/bankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+          value: jdbc:mysql://mysql-service:3306/IbtisamXbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
         - name: SPRING_DATASOURCE_USERNAME
           value: root
         - name: SPRING_DATASOURCE_PASSWORD
@@ -157,7 +169,7 @@ spec:
         livenessProbe:
           httpGet:
             path: /login
-            port: 8080
+            port: 8000
           initialDelaySeconds: 60
           timeoutSeconds: 5
           periodSeconds: 10
@@ -165,22 +177,24 @@ spec:
         readinessProbe:
           httpGet:
             path: /login
-            port: 8080
+            port: 8000
           initialDelaySeconds: 60
           timeoutSeconds: 5
           periodSeconds: 10
           failureThreshold: 3
+
+
 ---
 # BankApp Service
 apiVersion: v1
 kind: Service
 metadata:
   name: bankapp-service
-  namespace: webapps
+  namespace: ibtisamx
 spec:
   type: ClusterIP
   ports:
   - port: 80
-    targetPort: 8080
+    targetPort: 8000
   selector:
     app: bankapp
