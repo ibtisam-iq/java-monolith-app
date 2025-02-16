@@ -1,0 +1,120 @@
+# -------------------------------
+# Kubernetes Ingress Configuration for Banking App
+# -------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bankapp-ingress
+  annotations:
+    # Annotation for cert-manager to use Let's Encrypt production environment for issuing certificates.
+    # cert-manager is responsible for managing SSL certificates in Kubernetes.
+
+    # Tells cert-manager to use the below ClusterIssuer for TLS.
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # Force SSL redirection to ensure all traffic is encrypted # Redirects all HTTP traffic to HTTPS.
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Rewrite the path to root URL to handle requests correctly.
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    # Enable SSL redirection to ensure all traffic is encrypted.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Defines backend service communication protocol.
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+
+
+spec:
+  # Defines which ingress controller to use. Here, it's 'nginx' (Kubernetes-native ingress controller).
+  # Specifies that this Ingress uses the NGINX Ingress Controller.
+  ingressClassName: nginx  
+
+  rules:
+    - host: www.ibtisam-iq.com  # The domain name for routing traffic to the backend service.
+      http:
+        paths:
+          - path: /
+            pathType: Prefix  # Ensures that all requests starting with "/" are routed.
+            backend:
+              service:
+                name: bankapp-service  # The Kubernetes service that handles the requests and routes traffic to the bank app.
+                port:
+                  number: 80  # The target port of the backend service.
+
+  tls:
+    - hosts:
+        - www.ibtisam-iq.com  # Hostname to secure with SSL. This is the domain name that will be secured.
+      secretName: ibtisamx-tls  # Kubernetes Secret where the TLS certificate will be stored. This is the secret that Stores the TLS certificate and private key.
+
+
+
+
+---
+# -------------------------------
+# Cert-Manager ClusterIssuer for Let's Encrypt
+# -------------------------------
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod  # The name of the issuer (referenced in Ingress annotation above).
+spec:
+  acme:
+  # ACME (Automatic Certificate Management Environment) is used for issuing SSL/TLS certificates.
+  # Let's Encrypt is a widely used free certificate authority.
+    server: https://acme-v02.api.letsencrypt.org/directory  # Let's Encrypt API endpoint for certificate requests.
+    email: muhammad@ibtisam-iq.com  # Your email for important notifications regarding SSL certificates.
+    
+    privateKeySecretRef:
+      name: letsencrypt-prod  # Secret to store the private key for certificate renewal.
+
+    solvers:
+      - http01:
+          ingress:
+            class: nginx  # HTTP-01 solver requires an Ingress controller (Nginx in this case).
+
+# -------------------------------
+# EXPLANATION & KEY CONCEPTS
+# -------------------------------
+
+# WHAT IS CERT-MANAGER?
+# Cert-Manager is a Kubernetes add-on that automates the management and issuance of TLS certificates.
+# It integrates with certificate authorities like Let's Encrypt to provide SSL encryption.
+
+# WHAT IS LET'S ENCRYPT?
+# Let's Encrypt is a free, automated, and open certificate authority (CA) that provides SSL/TLS certificates.
+
+# WHY DO WE NEED A CLUSTERISSUER?
+# A ClusterIssuer is a global cert-manager resource that allows issuing certificates across multiple namespaces.
+# Without a ClusterIssuer, you would need to define an Issuer in each namespace.
+
+# WHY HTTP-01 CHALLENGE?
+# The HTTP-01 challenge is the most common way to prove domain ownership to Let's Encrypt.
+# It requires an HTTP request to a temporary file hosted on the domain, which Let's Encrypt verifies.
+
+# DIFFERENCE BETWEEN HTTP-01 & STANDALONE MODE:
+# - HTTP-01 (Used Here): Requires a publicly accessible web server (Nginx in this case).
+#   - Works best when you have an existing web service in Kubernetes.
+#   - You need a DNS A record pointing to the Ingress controller's external IP.
+
+# - Standalone Mode (Used in Docker Compose Setup):
+#   - Requires temporarily stopping the application to allow Certbot to serve verification files.
+#   - Suitable when there is no existing web server to serve challenge files.
+
+# DO I NEED TO UPDATE THE GODADDY DNS A RECORD?
+# YES! 
+# - In both HTTP-01 and standalone mode, you must update the A record in GoDaddy to point to your Kubernetes Ingress controller's external IP.
+# - This ensures Let's Encrypt can reach the HTTP challenge hosted by the Ingress controller.
+
+# WHEN TO USE HTTP-01 INSTEAD OF STANDALONE?
+# - Use HTTP-01 if your application is always running and you have an Ingress controller.
+# - Use standalone mode if you don't have a running web server or Kubernetes environment.
+
+# HOW DOES RENEWAL WORK?
+# - Cert-Manager automatically renews certificates before they expire.
+# - It revalidates the HTTP-01 challenge and updates the Kubernetes Secret.
+
+# WHERE IS THE CERTIFICATE STORED?
+# - The TLS certificate is stored in the Kubernetes secret defined in `tls.secretName`.
+# - It is automatically used by Nginx to terminate SSL at the Ingress level.
+
+# FINAL NOTES:
+# - Ensure that your Kubernetes cluster has an Nginx Ingress Controller installed.
+# - Check that cert-manager is deployed and running correctly.
+# - Your DNS A record should always point to the Kubernetes Ingress controller's public IP.

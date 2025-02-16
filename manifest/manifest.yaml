@@ -157,6 +157,8 @@ spec:
         ports:
         - containerPort: 8000
         env:
+        - name: SPRING_APPLICATION_NAME
+          value: "IbtisamXbankapp"
         - name: SPRING_DATASOURCE_URL
           value: jdbc:mysql://mysql-service:3306/IbtisamXbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
         - name: SPRING_DATASOURCE_USERNAME
