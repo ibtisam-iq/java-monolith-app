@@ -1,6 +1,8 @@
 pipeline {
     agent any
 
+    // Continuous Deployment  
+
     stages {
         stage('Git Checkout') {
             steps {
@@ -11,12 +13,12 @@ pipeline {
         stage('Kubernetes Deployment') {
             steps {
                 dir ('manifest/') {
-                    withKubeConfig(caCertificate: '', clusterName: 'IbtisamX-cluster', contextName: '', credentialsId: 'k8-token', namespace: 'IbtisamX', restrictKubeConfigAccess: false, serverUrl: 'https://952FB702C508F688D873376083B31DF5.gr7.ap-south-1.eks.amazonaws.com') {
-                        sh "kubectl apply -f manifest.yaml -n IbtisamX"
+                    withKubeConfig(caCertificate: '', clusterName: 'ibtisamx-cluster', contextName: '', credentialsId: 'k8-token', namespace: 'ibtisamx', restrictKubeConfigAccess: false, serverUrl: 'https://952FB702C508F688D873376083B31DF5.gr7.ap-south-1.eks.amazonaws.com') {
+                        sh "kubectl apply -f manifest.yaml -n ibtisamx"
                         sh "kubectl apply -f HPA.yaml "
                         sleep 30
-                        sh "kubectl get pods -n IbtisamX"
-                        sh "kubectl get service -n IbtisamX"
+                        sh "kubectl get pods -n ibtisamx"
+                        sh "kubectl get service -n ibtisamx"
                     }    
                 }
             }

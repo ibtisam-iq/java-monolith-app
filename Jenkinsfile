@@ -10,6 +10,7 @@ pipeline {
         IMAGE_TAG = "v${BUILD_NUMBER}"
     }
 
+
     stages {
         /*
         stage('Git Checkout') {
@@ -18,6 +19,9 @@ pipeline {
             }
         }
         */
+        
+        // Continuous Integration
+        
         stage('Compile') {
             steps {
                 sh "mvn compile"
@@ -129,8 +133,9 @@ pipeline {
             }
         }
     }
-    
-    
+}    
+    // Post Actions
+
 post {
     always {
         script {
@@ -165,4 +170,4 @@ post {
         }
     }
 }
-}
+
