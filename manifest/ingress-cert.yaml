@@ -1,3 +1,6 @@
+# kubectl create ingress bankapp-ingress --annotation ibtisam=loveyou --class nginx --rule www.ibtisam-iq.com/*=bankapp-service:80,tls=ibtisamx-tls --dry-run=client -o yaml
+
+
 # -------------------------------
 # Kubernetes Ingress Configuration for Banking App
 # -------------------------------
