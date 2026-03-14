@@ -11,7 +11,7 @@ COPY src ./src
 RUN mvn clean package -DskipTests
 
 # Second Stage: Production-ready container
-FROM openjdk:17-jdk-alpine
+FROM eclipse-temurin:17-jdk-alpine
 WORKDIR /usr/src/app
 
 # Copy built JAR file from builder stage
