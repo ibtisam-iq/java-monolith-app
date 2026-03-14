@@ -1,5 +1,5 @@
 # First Stage: Build the application
-FROM maven:3.9.9-eclipse-temurin-17-alpine AS IbtisamX
+FROM maven:3.9.9-eclipse-temurin-17-alpine AS ibtisam-iq
 WORKDIR /usr/src/app
 
 # Copy pom.xml first to cache dependencies (optimized)
@@ -15,10 +15,9 @@ FROM eclipse-temurin:17-jdk-alpine
 WORKDIR /usr/src/app
 
 # Copy built JAR file from builder stage
-COPY --from=IbtisamX /usr/src/app/target/*.jar app.jar
+COPY --from=ibtisam-iq /usr/src/app/target/*.jar app.jar
 
 # No need to expose port here (it's done in docker-compose.yml)
 EXPOSE 8000
 
 CMD ["java", "-jar", "app.jar"]  
-
