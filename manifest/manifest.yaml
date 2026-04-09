@@ -4,10 +4,10 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: mysql-secret
-  namespace: ibtisamx
+  namespace: ibtisamiq
 type: Opaque
 data:
-  MYSQL_ROOT_PASSWORD: SWJ0aXNhbVg= # echo -n 'IbtisamX' | base64
+  MYSQL_ROOT_PASSWORD: SWJ0aXNhbUlR # echo -n 'IbtisamIQ' | base64
 
 
 ---
@@ -16,9 +16,9 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: mysql-config
-  namespace: ibtisamx
+  namespace: ibtisamiq
 data:
-  MYSQL_DATABASE: "IbtisamXbankappdb"
+  MYSQL_DATABASE: "IbtisamIQbankappdb"
 
 
 ---
@@ -41,7 +41,7 @@ apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: mysql-pvc
-  namespace: ibtisamx
+  namespace: ibtisamiq
 spec:
   accessModes:
     - ReadWriteOnce
@@ -57,7 +57,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mysql
-  namespace: ibtisamx
+  namespace: ibtisamiq
 spec:
   selector:
     matchLabels:
@@ -118,7 +118,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: mysql-service
-  namespace: ibtisamx
+  namespace: ibtisamiq
 spec:
   ports:
   - port: 3306
@@ -133,7 +133,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: bankapp
-  namespace: ibtisamx
+  namespace: ibtisamiq
 spec:
   replicas: 1
   selector:
@@ -158,9 +158,9 @@ spec:
         - containerPort: 8000
         env:
         - name: SPRING_APPLICATION_NAME
-          value: "IbtisamXbankapp"
+          value: "IbtisamIQbankapp"
         - name: SPRING_DATASOURCE_URL
-          value: jdbc:mysql://mysql-service:3306/IbtisamXbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+          value: jdbc:mysql://mysql-service:3306/IbtisamIQbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
         - name: SPRING_DATASOURCE_USERNAME
           value: root
         - name: SPRING_DATASOURCE_PASSWORD
@@ -192,7 +192,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: bankapp-service
-  namespace: ibtisamx
+  namespace: ibtisamiq
 spec:
   type: ClusterIP
   ports:
