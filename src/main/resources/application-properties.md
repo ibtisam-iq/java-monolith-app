@@ -4,7 +4,7 @@ spring.application.name=bankapp
 # MySQL Database configuration
 spring.datasource.url=jdbc:mysql://localhost:3306/bankappdb?useSSL=false&serverTimezone=UTC
 spring.datasource.username=root
-spring.datasource.password=IbtisamX
+spring.datasource.password=IbtisamIQ
 spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
 
 # JPA & Hibernate configuration
@@ -36,7 +36,7 @@ spring.datasource.username=${MYSQL_USER}
 spring.datasource.password=${MYSQL_PASSWORD}
 spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
 
-# Reason: 
+# Reason:
 # - Removed hardcoded values and replaced them with environment variables.
 # - "localhost" changed to "db" (Docker service name) to enable communication.
 
@@ -74,15 +74,15 @@ spring.jpa.database-platform=${SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT}  # MySQL
 spring.jpa.show-sql=${SPRING_JPA_SHOW_SQL}  # Enables logging of SQL queries (useful for debugging)
 
 # ✅ Fix for "depends_on" Issue (Ensures MySQL is Fully Ready)
-spring.datasource.initialization-mode=always  
-spring.sql.init.mode=always  
+spring.datasource.initialization-mode=always
+spring.sql.init.mode=always
 # 🛠️ This makes sure the app waits for MySQL to be **fully initialized** before executing queries.
 
 # ------------------------------
 # ✅ Actuator Configuration (New)
 # ------------------------------
 # 🟢 Exposes the "health" endpoint for Docker health checks
-management.endpoints.web.exposure.include=health  
+management.endpoints.web.exposure.include=health
 
 
 # ✅ Other Optional Settings

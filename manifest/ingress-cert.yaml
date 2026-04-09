@@ -1,4 +1,4 @@
-# kubectl create ingress bankapp-ingress --annotation ibtisam=loveyou --class nginx --rule www.ibtisam-iq.com/*=bankapp-service:80,tls=ibtisamx-tls --dry-run=client -o yaml
+# kubectl create ingress bankapp-ingress --annotation ibtisam=loveyou --class nginx --rule www.ibtisam-iq.com/*=bankapp-service:80,tls=ibtisamiq-tls --dry-run=client -o yaml
 
 
 # -------------------------------
@@ -27,7 +27,7 @@ metadata:
 spec:
   # Defines which ingress controller to use. Here, it's 'nginx' (Kubernetes-native ingress controller).
   # Specifies that this Ingress uses the NGINX Ingress Controller.
-  ingressClassName: nginx  
+  ingressClassName: nginx
 
   rules:
     - host: www.ibtisam-iq.com  # The domain name for routing traffic to the backend service.
@@ -44,7 +44,7 @@ spec:
   tls:
     - hosts:
         - www.ibtisam-iq.com  # Hostname to secure with SSL. This is the domain name that will be secured.
-      secretName: ibtisamx-tls  # Kubernetes Secret where the TLS certificate will be stored. This is the secret that Stores the TLS certificate and private key.
+      secretName: ibtisamiq-tls  # Kubernetes Secret where the TLS certificate will be stored. This is the secret that Stores the TLS certificate and private key.
 
 
 
@@ -63,7 +63,7 @@ spec:
   # Let's Encrypt is a widely used free certificate authority.
     server: https://acme-v02.api.letsencrypt.org/directory  # Let's Encrypt API endpoint for certificate requests.
     email: muhammad@ibtisam-iq.com  # Your email for important notifications regarding SSL certificates.
-    
+
     privateKeySecretRef:
       name: letsencrypt-prod  # Secret to store the private key for certificate renewal.
 
@@ -101,7 +101,7 @@ spec:
 #   - Suitable when there is no existing web server to serve challenge files.
 
 # DO I NEED TO UPDATE THE GODADDY DNS A RECORD?
-# YES! 
+# YES!
 # - In both HTTP-01 and standalone mode, you must update the A record in GoDaddy to point to your Kubernetes Ingress controller's external IP.
 # - This ensures Let's Encrypt can reach the HTTP challenge hosted by the Ingress controller.
 

@@ -1,5 +1,5 @@
 # RBAC
- 
+
  RBAC YAML configuration for the `jenkins` ServiceAccount, Role, RoleBinding, ClusterRole, and ClusterRoleBinding to ensure the ServiceAccount can create all the resources in your YAML file, including dynamic provisioning with StorageClasses and PersistentVolumes.
 
 ### **1. ServiceAccount**
@@ -8,7 +8,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: jenkins
-  namespace: ibtisamx
+  namespace: ibtisamiq
 ```
 
 
@@ -18,7 +18,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: jenkins-role
-  namespace: ibtisamx
+  namespace: ibtisamiq
 rules:
   # Permissions for core API resources
   - apiGroups: [""]
@@ -57,7 +57,7 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: jenkins-rolebinding
-  namespace: ibtisamx
+  namespace: ibtisamiq
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -65,7 +65,7 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: jenkins
-    namespace: ibtisamx
+    namespace: ibtisamiq
 ```
 
 
@@ -100,15 +100,15 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: jenkins
-    namespace: ibtisamx
+    namespace: ibtisamiq
 ```
 
 
 
 ### **Explanation of Permissions**
 
-1. **ServiceAccount**:  
-   - The `jenkins` ServiceAccount is created in the `ibtisamx` namespace.
+1. **ServiceAccount**:
+   - The `jenkins` ServiceAccount is created in the `ibtisamiq` namespace.
 
 2. **Role**:
    - Grants access to namespace-specific resources:
@@ -116,7 +116,7 @@ subjects:
      - **Deployments** and **ReplicaSets** under the `apps` API group.
 
 3. **RoleBinding**:
-   - Binds the `jenkins` Role to the ServiceAccount in the `ibtisamx` namespace.
+   - Binds the `jenkins` Role to the ServiceAccount in the `ibtisamiq` namespace.
 
 4. **ClusterRole**:
    - Grants access to cluster-wide resources:
@@ -147,9 +147,9 @@ subjects:
 
 3. Verify the ServiceAccount has the expected permissions:
    ```bash
-   kubectl auth can-i create secrets --as=system:serviceaccount:ibtisamx:jenkins -n ibtisamx
-   kubectl auth can-i create storageclasses --as=system:serviceaccount:ibtisamx:jenkins
-   kubectl auth can-i create persistentvolumes --as=system:serviceaccount:ibtisamx:jenkins
+   kubectl auth can-i create secrets --as=system:serviceaccount:ibtisamiq:jenkins -n ibtisamiq
+   kubectl auth can-i create storageclasses --as=system:serviceaccount:ibtisamiq:jenkins
+   kubectl auth can-i create persistentvolumes --as=system:serviceaccount:ibtisamiq:jenkins
    ```
 
 ### Generate token using service account in the namespace
