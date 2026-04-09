@@ -1,114 +1,127 @@
-<?xml version="1.0" encoding="UTF-8"?>  
-
-<!-- The root element of a Maven project configuration file -->
+<?xml version="1.0" encoding="UTF-8"?>
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
 	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
 
-    <!-- modelVersion: Defines the POM model version. Always set to 4.0.0 for Maven 2+ projects -->
+    <!-- modelVersion: Always 4.0.0 for Maven 2+ projects -->
 	<modelVersion>4.0.0</modelVersion>
 
-    <!-- Parent section: Specifies that this project inherits settings from a parent POM (Spring Boot Starter Parent in this case) -->
+    <!-- Parent: Spring Boot 3.4.4 — latest stable (April 2026) -->
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
-		<version>3.3.3</version>
-		<relativePath/> <!-- If empty, Maven will look up the parent in repositories -->
+		<version>3.4.4</version>
+		<relativePath/>
 	</parent>
 
-    <!-- Group ID: Specifies the unique identifier for the project's group or organization.
-        Typically represents a domain or company name in reverse format. 
-	-->
-	<groupId>com.ibtisam-iq</groupId>
-    
-    <!-- artifactId: The name of your project; used to generate JAR/WAR file names -->
-	<artifactId>IbtisamXbankapp</artifactId>
-    
-    <!-- version: Defines the version of the project. 'SNAPSHOT' indicates a work-in-progress build -->
+    <!-- groupId must not contain hyphens — Maven naming convention -->
+	<groupId>com.ibtisamiq</groupId>
+	<artifactId>bankapp</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-    
-    <!-- name: The project's display name -->
-	<name>IbtisamXbankapp</name>
-    
-    <!-- description: A brief summary of the project -->
-	<description>Banking Web Application</description>
+	<name>BankApp</name>
+	<description>Banking Web Application — DevSecOps Portfolio Project by ibtisam-iq</description>
+	<url>https://github.com/ibtisam-iq/java-app-multi-deployment</url>
 
-    <!-- url: Can contain the project homepage or repository link (currently empty) -->
-	<url/>
-
-    <!-- Licenses: Used to specify the licensing information of the project (currently empty) -->
 	<licenses>
-		<license/>
+		<license>
+			<name>MIT License</name>
+			<url>https://opensource.org/licenses/MIT</url>
+		</license>
 	</licenses>
 
-    <!-- Developers: Defines project contributors (currently empty) -->
 	<developers>
-		<developer/>
+		<developer>
+			<id>ibtisam-iq</id>
+			<name>Muhammad Ibtisam Iqbal</name>
+			<url>https://github.com/ibtisam-iq</url>
+			<roles>
+				<role>DevOps Engineer</role>
+			</roles>
+		</developer>
 	</developers>
 
-    <!-- Source Control Management (SCM): Defines version control system details (e.g., GitHub, GitLab) -->
 	<scm>
-		<connection/>
-		<developerConnection/>
-		<tag/>
-		<url/>
+		<connection>scm:git:https://github.com/ibtisam-iq/java-app-multi-deployment.git</connection>
+		<developerConnection>scm:git:git@github.com:ibtisam-iq/java-app-multi-deployment.git</developerConnection>
+		<url>https://github.com/ibtisam-iq/java-app-multi-deployment</url>
+		<tag>HEAD</tag>
 	</scm>
 
-    <!-- Properties: Used to define custom variables that can be used across the POM -->
 	<properties>
-		<java.version>17</java.version> <!-- Specifies the Java version used -->
-		<jacoco.version>0.8.7</jacoco.version> <!-- Specifies the version of JaCoCo for code coverage -->
-   		<sonar.java.coveragePlugin>jacoco</sonar.java.coveragePlugin>
-    		<sonar.dynamicAnalysis>reuseReports</sonar.dynamicAnalysis>
-    		<sonar.jacoco.reportPath>${project.basedir}/../target/jacoco.exec</sonar.jacoco.reportPath>
-    		<sonar.language>java</sonar.language>
+        <!-- Java 21: current LTS, supported until 2028 (replaces Java 17) -->
+		<java.version>21</java.version>
+        <!-- JaCoCo 0.8.12: latest stable (0.8.7 was from 2021) -->
+		<jacoco.version>0.8.12</jacoco.version>
+		<sonar.java.coveragePlugin>jacoco</sonar.java.coveragePlugin>
+		<sonar.dynamicAnalysis>reuseReports</sonar.dynamicAnalysis>
+		<sonar.jacoco.reportPath>${project.basedir}/../target/jacoco.exec</sonar.jacoco.reportPath>
+		<sonar.language>java</sonar.language>
 	</properties>
 
-    <!-- Dependencies: External libraries required by the project -->
 	<dependencies>
 		<!-- Spring Boot JPA for database interactions -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
 		</dependency>
+
 		<!-- Spring Boot Security for authentication and authorization -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-security</artifactId>
 		</dependency>
+
 		<!-- Thymeleaf templating engine -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-thymeleaf</artifactId>
 		</dependency>
-		<!-- Spring Boot Web for building REST APIs and MVC applications -->
+
+		<!-- Spring Boot Web for MVC and REST -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-web</artifactId>
 		</dependency>
-		<!-- Thymeleaf extras for Spring Security integration -->
+
+		<!-- Thymeleaf + Spring Security integration -->
 		<dependency>
 			<groupId>org.thymeleaf.extras</groupId>
 			<artifactId>thymeleaf-extras-springsecurity6</artifactId>
 		</dependency>
-		<!-- MySQL database connector -->
+
+		<!-- Bean Validation (Jakarta) — input validation for banking forms -->
 		<dependency>
-			<groupId>mysql</groupId>
-			<artifactId>mysql-connector-java</artifactId>
-			<version>8.0.33</version>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-validation</artifactId>
+		</dependency>
+
+		<!--
+		    Actuator: exposes /actuator/health and /actuator/info
+		    Required for Kubernetes liveness/readiness probes in deployment manifests
+		-->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-actuator</artifactId>
+		</dependency>
+
+		<!--
+		    MySQL Connector: replaced deprecated mysql:mysql-connector-java
+		    Old artifact (deprecated since 8.0.31): mysql:mysql-connector-java
+		    New artifact: com.mysql:mysql-connector-j
+		    No <version> tag — Spring Boot BOM manages compatibility automatically
+		-->
+		<dependency>
+			<groupId>com.mysql</groupId>
+			<artifactId>mysql-connector-j</artifactId>
 			<scope>runtime</scope>
 		</dependency>
-		<!-- JaCoCo code coverage tool -->
-		<dependency>
-    		<groupId>org.jacoco</groupId> 
-    		<artifactId>jacoco-maven-plugin</artifactId>
-    		<version>0.8.7</version>
-		</dependency>
-		<!-- Unit testing dependencies -->
+
+		<!-- Unit testing -->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-test</artifactId>
 			<scope>test</scope>
 		</dependency>
+
 		<!-- Spring Security testing utilities -->
 		<dependency>
 			<groupId>org.springframework.security</groupId>
@@ -117,46 +130,49 @@
 		</dependency>
 	</dependencies>
 
-    <!-- Build configuration: Specifies plugins used during the build process -->
 	<build>
 		<plugins>
-			<!-- Plugin to package and run Spring Boot applications -->
+			<!-- Spring Boot Maven plugin -->
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
-			<!-- Plugin for generating code coverage reports using JaCoCo -->
+
+			<!--
+			    JaCoCo for code coverage reports.
+			    NOTE: This plugin belongs ONLY here in <build><plugins>.
+			    It was incorrectly duplicated in <dependencies> — that has been removed.
+			-->
 			<plugin>
-            <groupId>org.jacoco</groupId>
-            <artifactId>jacoco-maven-plugin</artifactId>
-            <version>${jacoco.version}</version>
-            <executions>
-                <execution>
-                    <goals>
-                        <goal>prepare-agent</goal>
-                    </goals>
-                </execution>
-                <execution>
-                    <id>report</id>
-                    <phase>test</phase>
-                    <goals>
-                        <goal>report</goal>
-                    </goals>
-                </execution>
-            </executions>
-        </plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>${jacoco.version}</version>
+				<executions>
+					<execution>
+						<goals>
+							<goal>prepare-agent</goal>
+						</goals>
+					</execution>
+					<execution>
+						<id>report</id>
+						<phase>test</phase>
+						<goals>
+							<goal>report</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
 		</plugins>
 	</build>
 
-    <!-- Distribution Management: Defines locations for deploying artifacts -->
-    <distributionManagement>
-        <repository>
-            <id>maven-releases</id>
-            <url>NEXUS-URL/repository/maven-releases/</url>
-        </repository>
-        <snapshotRepository>
-            <id>maven-snapshots</id>
-            <url>NEXUS-URL/repository/maven-snapshots/</url>
-        </snapshotRepository>
-    </distributionManagement>
+	<distributionManagement>
+		<repository>
+			<id>maven-releases</id>
+			<url>NEXUS-URL/repository/maven-releases/</url>
+		</repository>
+		<snapshotRepository>
+			<id>maven-snapshots</id>
+			<url>NEXUS-URL/repository/maven-snapshots/</url>
+		</snapshotRepository>
+	</distributionManagement>
 </project>
