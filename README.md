@@ -1,118 +1,134 @@
-# Java Three-Tier Monolithic Application — Multi-Environment Deployment
+# Java Monolith Application
 
 ## Overview
 
-This project is a Java-based three-tier application integrated with MySQL, used as a base system to demonstrate how the same application can be deployed across multiple environments.
+This is a Java-based monolithic application that I use as a base system to build and demonstrate real DevSecOps pipelines and platform engineering workflows.
 
-> The focus is not on application development, but on how a real system behaves when deployed using different infrastructure and DevOps approaches.
-
----
-
-## Problem Statement
-
-How can a single application be deployed consistently across different environments such as local systems, containers, virtual machines, and Kubernetes?
-
-What changes in setup, complexity, and operational handling when the infrastructure changes?
+I did not build this application from scratch. Instead, I use it to focus on what happens **around the code** — building, securing, packaging, and running it in real environments.
 
 ---
 
-## Base Application
+## Application Structure
 
-The underlying system is a standard three-tier architecture:
+The application follows a three-tier structure:
 
-* Presentation Layer
-* Application Layer (Java / Spring Boot)
-* Data Layer (MySQL)
+- Presentation Layer → Controllers / UI
+- Business Layer → Service logic
+- Data Layer → Database interaction
 
-The application supports basic operations like account management and transactions, which are common in banking-style systems ([DEV Community][1]).
-
-This application remains unchanged across all deployments.
+All components are packaged into a single deployable unit (monolith).
 
 ---
 
-## Tech Stack
+## Technology Stack
 
-* Java (Spring Boot)
-* MySQL
-* Maven
-* REST APIs
-
----
-
-## Project Structure
-
-```
-.
-├── src/                # Application source code
-├── resources/          # Config files
-├── docker/             # Dockerfiles
-├── compose/            # Docker Compose
-├── terraform/          # AWS Infrastructure
-├── k8s/                # Kubernetes manifests
-├── docs/               # Deployment guides
-└── README.md
-```
+- Java 21
+- Spring Boot
+- Spring Data JPA
+- MySQL
+- Embedded Tomcat
 
 ---
 
-## Deployment Environments
+## Runtime Behavior
 
-This project demonstrates deployment across multiple environments:
+The application runs as a standalone JAR and starts an embedded web server on port 8000.
 
-1. Local (Direct execution)
-2. Docker (Containerized deployment)
-3. Docker Compose (Multi-service setup)
-4. EC2 + Auto Scaling + Load Balancer
-5. ECS Fargate (Serverless containers)
-6. EKS (Kubernetes)
-
-Each deployment is implemented and documented separately.
+It connects to a MySQL database and automatically creates required tables at startup. 
 
 ---
 
-## Key Focus
+## Implementation Journey
 
-* Practical deployment workflows
-* Infrastructure setup across environments
-* Containerization and orchestration
-* Understanding how deployment changes system behavior
+This repository represents the starting point of a larger system. I used this application to build and validate real-world DevSecOps and platform engineering workflows.
 
 ---
 
-## Why This Project
+### 1. Environment Standardization
 
-This project shows:
+The original application contained hardcoded configuration values.
 
-* How to **run the same application everywhere**
-* How to **adapt infrastructure**
-* How to **handle deployments in real-world scenarios**
+I refactored the configuration to use environment variables, making it portable and deployment-ready.
 
----
+- Replaced hardcoded database and application settings
+- Introduced environment-based configuration via `.env`
+- Added `.env.example` for reproducibility
 
-## Documentation
-
-Detailed guides are available in the `docs/` directory:
-
-* docs/local.md
-* docs/docker.md
-* docs/docker-compose.md
-* docs/ec2.md
-* docs/fargate.md
-* docs/eks.md
+This step ensures the application can run consistently across different environments.
 
 ---
 
-## Future Improvements
+### 2. Local Execution & Validation
 
-* CI/CD pipelines (Jenkins, GitHub Actions)
-* Monitoring (Prometheus, Grafana)
-* Logging (ELK stack)
-* Secrets management
+Before building any pipelines, I validated the application locally.
+
+I:
+
+- Installed and configured MySQL
+- Created and connected the database
+- Ran the application as a JAR
+- Verified end-to-end functionality
+
+This step ensured the system works correctly before automation.
 
 ---
 
-## Author
+### 3. DevSecOps Pipelines (CI/CD)
 
-Muhammad Ibtisam Iqbal
+After validation, I built pipelines to transform this code into a secure, deployable artifact.
 
-DevOps Engineer | Cloud Infrastructure | Kubernetes (CKA, CKAD)
+In these pipelines, I:
+
+- Built the application using Maven
+- Performed code quality analysis using SonarQube
+- Scanned for vulnerabilities using Trivy
+- Packaged the application into a Docker image
+- Managed artifacts using Nexus
+- Automated workflows using Jenkins and GitHub Actions
+
+👉 Pipelines repository:
+https://github.com/ibtisam-iq/devsecops-pipelines
+
+---
+
+### 4. Platform Engineering (Deployment & Operations)
+
+Once the artifact was ready, I deployed and operated the system using multiple approaches.
+
+I implemented:
+
+- Local deployment (JAR + MySQL)
+- Docker and Docker Compose
+- AWS EC2 with Auto Scaling
+- Kubernetes deployment using EKS
+- Infrastructure provisioning using Terraform
+
+I also explored:
+
+- Monitoring and observability
+- Scaling strategies
+- System reliability and recovery
+
+👉 Platform repository:
+https://github.com/ibtisam-iq/platform-engineering-systems
+
+---
+
+## Key Idea
+
+This repository represents:
+
+> Code → Input
+
+Everything else (CI/CD, security, deployment, scaling) is built **around it**.
+
+---
+
+## Note
+
+The goal is not to showcase application development.
+
+The goal is to demonstrate:
+
+- How any application can be taken as input
+- And transformed into a production-like system using DevSecOps and platform engineering practices
