@@ -56,9 +56,8 @@ Key variables set in `.env`:
 
 ```env
 SPRING_APPLICATION_NAME=IbtisamIQBankApp
-MYSQL_DATABASE=IbtisamIQbankappdb
-MYSQL_USER=your_db_user
-MYSQL_PASSWORD=your_db_password
+SPRING_DATASOURCE_USERNAME=your_db_user
+SPRING_DATASOURCE_PASSWORD=your_db_password
 SPRING_DATASOURCE_URL="jdbc:mysql://localhost:3306/IbtisamIQbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
 SERVER_PORT=8000
 ```
@@ -116,7 +115,7 @@ Output artifact: `target/bankapp-0.0.1-SNAPSHOT.jar`
 set -a && source .env && set +a && java -jar target/bankapp-0.0.1-SNAPSHOT.jar
 ```
 
-> **Why `set -a`?** `set -a` marks every variable sourced from `.env` for automatic export into the child process (the JVM). `set +a` turns off the flag after sourcing so subsequent shell variables are not unintentionally exported. This is cleaner and more reliable than `export $(grep -v '^#' .env | xargs)`, which breaks on values containing spaces or special characters.
+> **Why `set -a`?** `set -a` marks every variable sourced from `.env` for automatic export into the child process (the JVM). `set +a` turns off the flag after sourcing so subsequent shell variables are not unintentionally exported.
 
 > **Note:** Running `java -jar` without loading env vars first will throw:
 > `PlaceholderResolutionException: Could not resolve placeholder 'SPRING_APPLICATION_NAME'`
@@ -133,7 +132,7 @@ With the application validated locally, I built automated pipelines to transform
 
 Pipelines include: Maven build → SonarQube analysis → Trivy vulnerability scan → Docker image build → Nexus artifact management → Jenkins & GitHub Actions automation.
 
-👉 **Pipelines repository:** [ibtisam-iq/DevSecOps-Pipelines](https://github.com/ibtisam-iq/DevSecOps-Pipelines)
+👉 **Pipelines repository:** [DevSecOps Pipelines](https://github.com/ibtisam-iq/devsecops-pipelines/tree/main/pipelines/java-monolith)
 
 ---
 
@@ -145,7 +144,7 @@ Deployment targets: Local JAR · Docker Compose · AWS EC2 · EKS (Kubernetes) �
 
 Also covered: monitoring, observability, scaling strategies, and system reliability.
 
-👉 **Platform repository:** [ibtisam-iq/Platform-Engineering-Systems](https://github.com/ibtisam-iq/Platform-Engineering-Systems)
+👉 **Platform repository:** [Platform Engineering Systems](https://github.com/ibtisam-iq/platform-engineering-systems/tree/main/systems/java-monolith)
 
 ---
 
@@ -154,8 +153,8 @@ Also covered: monitoring, observability, scaling strategies, and system reliabil
 ```
 java-monolith-app  ←  Single source of truth (codebase only)
         │
-        ├── git submodule → DevSecOps-Pipelines     (CI/CD)
-        └── git submodule → Platform-Engineering-Systems  (Deployment)
+        ├── git submodule → DevSecOps Pipelines     (CI/CD)
+        └── git submodule → Platform Engineering Systems  (Deployment)
 ```
 
 This repository holds only the application code. All DevOps work — pipelines, deployment configs, and infrastructure — lives in the downstream repositories and references this one via Git submodules.
