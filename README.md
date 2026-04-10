@@ -59,9 +59,11 @@ SPRING_APPLICATION_NAME=IbtisamIQBankApp
 MYSQL_DATABASE=IbtisamIQbankappdb
 MYSQL_USER=your_db_user
 MYSQL_PASSWORD=your_db_password
-SPRING_DATASOURCE_URL=jdbc:mysql://localhost:3306/IbtisamIQbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+SPRING_DATASOURCE_URL="jdbc:mysql://localhost:3306/IbtisamIQbankappdb?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true"
 SERVER_PORT=8000
 ```
+
+> **Note:** `SPRING_DATASOURCE_URL` must be wrapped in **double quotes** in the `.env` file. The `&` character in the query string is a shell special character (background process operator) — without quotes, the shell will truncate the URL at the first `&`, causing a datasource connection failure.
 
 ---
 
@@ -88,12 +90,19 @@ FLUSH PRIVILEGES;
 EXIT;
 ```
 
-**Load environment variables and build the artifact:**
+**Verify MySQL is running and the database exists:**
 
 ```bash
-# Export all vars from .env into the current shell
-export $(grep -v '^#' .env | xargs)
+# Check MySQL is running
+sudo systemctl status mysql
 
+# Confirm the database exists
+mysql -u your_db_user -p -e "SHOW DATABASES;" | grep IbtisamIQbankappdb
+```
+
+**Build the artifact:**
+
+```bash
 # Build the JAR (skip tests for speed)
 ./mvnw clean package -DskipTests
 ```
@@ -103,13 +112,13 @@ Output artifact: `target/bankapp-0.0.1-SNAPSHOT.jar`
 **Run the application:**
 
 ```bash
-# Environment must be exported first — the app reads vars at startup
-export $(grep -v '^#' .env | xargs)
-
-java -jar target/bankapp-0.0.1-SNAPSHOT.jar
+# Load env vars and run — all in one command
+set -a && source .env && set +a && java -jar target/bankapp-0.0.1-SNAPSHOT.jar
 ```
 
-> **Note:** Running `java -jar` without exporting env vars first will throw:
+> **Why `set -a`?** `set -a` marks every variable sourced from `.env` for automatic export into the child process (the JVM). `set +a` turns off the flag after sourcing so subsequent shell variables are not unintentionally exported. This is cleaner and more reliable than `export $(grep -v '^#' .env | xargs)`, which breaks on values containing spaces or special characters.
+
+> **Note:** Running `java -jar` without loading env vars first will throw:
 > `PlaceholderResolutionException: Could not resolve placeholder 'SPRING_APPLICATION_NAME'`
 >
 > The `.jar.original` file (Maven pre-repackage output) has no main manifest — always use the primary `.jar`.
