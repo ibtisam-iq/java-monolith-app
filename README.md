@@ -43,6 +43,27 @@ Three-tier architecture: Presentation (Controllers/Thymeleaf UI) → Business (S
 
 ## DevOps Implementation Journey
 
+### Step 0 — Codebase Modernization (`pom.xml`)
+
+The inherited codebase was functional but built on outdated dependencies. Before doing any DevOps work, I audited and modernized `pom.xml` to bring it up to current industry standards — because running pipelines on stale, vulnerable dependencies defeats the purpose of DevSecOps.
+
+> **Note:** Modernizing `pom.xml` is not my primary role as a DevOps Engineer. However, receiving a codebase that cannot build cleanly on current tooling is a real-world scenario. I used **AI-assisted analysis (Perplexity Pro)** to audit the dependency tree, identify outdated and deprecated artifacts, and apply the correct fixes — which is itself a practical DevOps skill: knowing what to fix, and knowing when to use the right tool to fix it efficiently.
+
+**Changes made:**
+
+| What | Before | After | Why |
+|---|---|---|---|
+| Spring Boot | `3.3.3` | `3.4.4` | 3.3.x reached end of OSS support; 3.4.x has security patches and Java 21 improvements |
+| Java version | `17` | `21` | Java 21 is the current LTS (supported until 2028); virtual threads, record patterns |
+| `groupId` | `com.ibtisam-iq` | `com.ibtisamiq` | Hyphens are invalid in Maven `groupId` — violates Maven naming convention |
+| MySQL connector | `mysql:mysql-connector-java:8.0.33` | `com.mysql:mysql-connector-j` (BOM-managed) | Old artifact is deprecated; new groupId is `com.mysql`, version managed by Spring Boot BOM |
+| JaCoCo | `0.8.7` (2021) + duplicate declaration | `0.8.12`, single declaration in `<plugins>` only | Updated to latest; removed erroneous duplicate entry in `<dependencies>` |
+| Added | — | `spring-boot-starter-actuator` | Provides `/actuator/health` endpoint required for Kubernetes liveness/readiness probes |
+| Added | — | `spring-boot-starter-validation` | Jakarta Bean Validation — necessary for any production-grade input handling |
+| SCM / Developer / License | Empty blocks | Filled with project details | Professional standard; visible to anyone who inspects the artifact |
+
+---
+
 ### Step 1 — Environment Standardization
 
 The original codebase had hardcoded database credentials and app config. I refactored it to use environment variables, making it portable across all environments.
