@@ -7,7 +7,7 @@ This is a Java Spring Boot-based monolithic banking web application serving as t
 - **[DevSecOps Pipelines](https://github.com/ibtisam-iq/devsecops-pipelines)** — CI/CD pipelines that build, scan, and package this application into a secure, deployable artifact using Jenkins, GitHub Actions, Docker, SonarQube, and Trivy.
 - **[Platform Engineering Systems](https://github.com/ibtisam-iq/platform-engineering-systems)** — Deployment workflows that run this artifact across Docker Compose, AWS EC2, EKS (Kubernetes), Terraform, and GitOps-based delivery.
 
-> The application source code was not written from scratch. As a DevOps Engineer, the focus here is on everything that happens **around the code** — building, securing, packaging, and operating it in production-like environments. The following files were added to this repository as part of that work: `Dockerfile`, `compose.yml`, `.dockerignore`, and `.gitignore`. Everything else under `src/` belongs to the original developer.
+> I did not write this application from scratch. As a DevOps Engineer, my focus is on everything that happens **around the code** — building, securing, packaging, and operating it in production-like environments. The files I added to this repository are: `Dockerfile`, `compose.yml`, `.dockerignore`, and `.gitignore`. Everything else under `src/` belongs to the original developer.
 
 ---
 
@@ -53,9 +53,9 @@ Three-tier architecture: Presentation (Controllers/Thymeleaf UI) → Business (S
 
 ### Step 0 — Codebase Modernization (`pom.xml`)
 
-The inherited codebase was functional but built on outdated dependencies. Before doing any DevOps work, `pom.xml` was audited and modernized to bring it up to current industry standards — because running pipelines on stale, vulnerable dependencies defeats the purpose of DevSecOps.
+The inherited codebase was functional but built on outdated dependencies. Before doing any DevOps work, I audited and modernized `pom.xml` to bring it up to current industry standards — because running pipelines on stale, vulnerable dependencies defeats the purpose of DevSecOps.
 
-> **Note:** Modernizing `pom.xml` is not a primary DevOps responsibility. However, receiving a codebase that cannot build cleanly on current tooling is a real-world scenario. **AI-assisted analysis (Perplexity Pro)** was used to audit the dependency tree, identify outdated and deprecated artifacts, and apply the correct fixes — which is itself a practical DevOps skill: knowing what to fix, and knowing when to use the right tool to fix it efficiently.
+> **Note:** Modernizing `pom.xml` is not my primary role as a DevOps Engineer. However, receiving a codebase that cannot build cleanly on current tooling is a real-world scenario. I used **AI-assisted analysis (Perplexity Pro)** to audit the dependency tree, identify outdated and deprecated artifacts, and apply the correct fixes — which is itself a practical DevOps skill: knowing what to fix, and knowing when to use the right tool to fix it efficiently.
 
 **Changes made:**
 
@@ -74,7 +74,7 @@ The inherited codebase was functional but built on outdated dependencies. Before
 
 ### Step 1 — Environment Standardization
 
-The original codebase had hardcoded database credentials and app config. These were refactored to use environment variables, making the application portable across all environments — bare-metal, Docker, and Kubernetes alike.
+The original codebase had hardcoded database credentials and app config. I refactored it to use environment variables, making the application portable across all environments — bare-metal, Docker, and Kubernetes alike.
 
 ```bash
 # Copy the template and fill in real values
@@ -97,7 +97,7 @@ SERVER_PORT=8000
 
 ### Step 2 — Local Build & Containerized Validation
 
-The full application lifecycle was validated using two methods before any automated pipeline was built: **bare-metal execution** directly on the host machine, and **containerized execution** via Docker Compose. Both are local environments — the distinction is whether MySQL and the JVM run natively on the OS or inside isolated containers.
+Before building any pipeline, I validated the full application lifecycle using two methods: **bare-metal execution** directly on the host machine, and **containerized execution** via Docker Compose. Both are local environments — the distinction is whether MySQL and the JVM run natively on the OS or inside isolated containers.
 
 #### Method 1 — Bare-Metal (Native Execution)
 
@@ -199,15 +199,17 @@ docker compose down -v
 
 ### Step 3 — Containerization (Docker)
 
-Before moving to automated pipelines, the application was packaged as a production-grade Docker image. This step covers writing the `Dockerfile` and `compose.yml` — including the decisions behind multi-stage builds, non-root user security, JVM container-awareness flags, and the healthcheck design.
+Before moving to automated pipelines, I packaged the application as a production-grade Docker image. I wrote the `Dockerfile` and `compose.yml` from scratch after reading the project code — `pom.xml`, `application.properties`, and `.env.example` — to understand exactly what the image needed: Java version, JAR filename, port, health endpoint, and environment variable strategy.
 
-The full rationale for every line is documented in [`docs/docker-setup.md`](docs/docker-setup.md).
+Key decisions I made and documented: multi-stage build to keep the runtime image lean (~165MB vs ~500MB), non-root user for CIS/Trivy compliance, JVM container-awareness flags (`-XX:+UseContainerSupport`) to prevent OOM kills in Kubernetes, and healthcheck timing tuned to Spring Boot's actual cold-start duration.
+
+The full rationale for every line is in [`docs/docker-setup.md`](docs/docker-setup.md).
 
 ---
 
 ### Step 4 — DevSecOps Pipelines (CI/CD)
 
-With the application validated both natively and in containers, automated pipelines were built to transform this code into a secure, deployable artifact.
+With the application validated both natively and in containers, I built automated pipelines to transform this code into a secure, deployable artifact.
 
 Pipelines include: Maven build → SonarQube analysis → Trivy vulnerability scan → Docker image build → Nexus artifact management → Jenkins & GitHub Actions automation.
 
@@ -217,7 +219,7 @@ Pipelines include: Maven build → SonarQube analysis → Trivy vulnerability sc
 
 ### Step 5 — Platform Engineering (Deployment & Operations)
 
-Once the artifact was ready, deployment was handled using multiple industry-standard approaches.
+Once the artifact was ready, I deployed it using multiple industry-standard approaches.
 
 Deployment targets: Local JAR · Docker Compose · AWS EC2 · EKS (Kubernetes) · Terraform-provisioned infrastructure.
 
