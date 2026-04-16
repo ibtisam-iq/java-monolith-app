@@ -7,7 +7,9 @@ This is a Java Spring Boot-based monolithic banking web application serving as t
 - **[DevSecOps Pipelines](https://github.com/ibtisam-iq/devsecops-pipelines)** — CI/CD pipelines that build, scan, and package this application into a secure, deployable artifact using Jenkins, GitHub Actions, Docker, SonarQube, and Trivy.
 - **[Platform Engineering Systems](https://github.com/ibtisam-iq/platform-engineering-systems)** — Deployment workflows that run this artifact across Docker Compose, AWS EC2, EKS (Kubernetes), Terraform, and GitOps-based delivery.
 
-> I did not write this application from scratch. As a DevOps Engineer, my focus is on everything that happens **around the code** — building, securing, packaging, and operating it in production-like environments. The files I added to this repository are: `Dockerfile`, `compose.yml`, `.dockerignore`, and `.gitignore`. Everything else under `src/` belongs to the original developer.
+> I did not write this application from scratch. As a DevOps Engineer, my focus is on everything that happens **around the code** — building, securing, packaging, and operating it in production-like environments.
+
+> The files I added to this repository are: `Dockerfile`, `compose.yml`, `.dockerignore`, and `.gitignore`. Everything else under `src/` belongs to the original developer.
 
 ---
 
@@ -55,7 +57,9 @@ Three-tier architecture: Presentation (Controllers/Thymeleaf UI) → Business (S
 
 The inherited codebase was functional but built on outdated dependencies. Before doing any DevOps work, I audited and modernized `pom.xml` to bring it up to current industry standards — because running pipelines on stale, vulnerable dependencies defeats the purpose of DevSecOps.
 
-> **Note:** Modernizing `pom.xml` is not my primary role as a DevOps Engineer. However, receiving a codebase that cannot build cleanly on current tooling is a real-world scenario. I used **AI-assisted analysis (Perplexity Pro)** to audit the dependency tree, identify outdated and deprecated artifacts, and apply the correct fixes — which is itself a practical DevOps skill: knowing what to fix, and knowing when to use the right tool to fix it efficiently.
+> **Note:** Modernizing `pom.xml` is not my primary role as a DevOps Engineer. However, receiving a codebase that cannot build cleanly on current tooling is a real-world scenario.
+
+> I used **AI-assisted analysis (Perplexity Pro)** to audit the dependency tree, identify outdated and deprecated artifacts, and apply the correct fixes.
 
 **Changes made:**
 
@@ -154,7 +158,12 @@ App runs at: `http://localhost:8000`
 
 With the application validated on bare metal, I wrote the `Dockerfile` and `compose.yml` from scratch. I read `pom.xml`, `application.properties`, and `.env.example` before writing a single line — to understand exactly what the image needed: Java version, JAR filename, exposed port, health endpoint, and environment variable strategy.
 
-Key decisions I made and documented: multi-stage build to keep the runtime image lean (~165MB vs ~500MB), non-root user for CIS/Trivy compliance, JVM container-awareness flags (`-XX:+UseContainerSupport`) to prevent OOM kills in Kubernetes, and healthcheck timing tuned to Spring Boot's actual cold-start duration.
+**Key decisions I made and documented:**
+
+- Multi-stage build to keep the runtime image lean (~190MB vs ~600MB)
+- Non-root user for CIS/Trivy compliance
+- JVM container-awareness flags (`-XX:+UseContainerSupport`) to prevent OOM kills in Kubernetes
+- Healthcheck timing tuned to Spring Boot's actual cold-start duration
 
 The full rationale for every line is in [`docs/docker-setup.md`](docs/docker-setup.md).
 
