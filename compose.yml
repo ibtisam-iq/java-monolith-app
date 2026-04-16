@@ -1,0 +1,93 @@
+# ============================================================
+# Docker Compose — Local Development Environment
+# For production deployments, see: platform-engineering-systems repo
+# ============================================================
+
+# Sets the Compose project name — all containers, networks, and volumes
+# will be prefixed with "bankapp" regardless of the directory name on any machine
+name: bankapp
+
+services:
+
+  # ── MySQL Database ──────────────────────────────────────────
+  db:
+    image: mysql:8.4          # 8.4: current LTS (mysql:8 / 8.0 reached EOL April 2026)
+    container_name: mysql-db
+    restart: unless-stopped
+
+    # env_file loads ALL variables from .env into this container automatically.
+    # No need to re-list them under environment: — they are already injected.
+    env_file: .env
+
+    # ── REDUNDANT BLOCK (kept for documentation purposes only) ──
+    # The four variables below are already loaded by env_file: .env above.
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}   # redundant — already loaded by env_file
+      MYSQL_DATABASE: ${MYSQL_DATABASE}             # redundant — already loaded by env_file
+      MYSQL_USER: ${MYSQL_USER}                     # redundant — already loaded by env_file
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}             # redundant — already loaded by env_file
+
+    volumes:
+      - mysql_data:/var/lib/mysql    # Named volume: data persists across restarts
+    networks:
+      - app-network
+    healthcheck:
+      # IMPORTANT: use "-h localhost" NOT "-h db"
+      # "-h db" is the Docker service name — invalid hostname inside the container itself
+      # Inside the container, MySQL listens on localhost/127.0.0.1
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── Spring Boot Application ─────────────────────────────────
+  web:
+    build:
+      context: .                    # java-monolith-app repo root
+      dockerfile: Dockerfile
+    image: java-monolith-bankapp    # Explicit image name — reusable for registry push without re-tagging
+    container_name: bank-web
+    restart: unless-stopped
+
+    # env_file loads ALL variables from .env into this container automatically.
+    # This includes: SPRING_APPLICATION_NAME, SPRING_DATASOURCE_USERNAME,
+    # SPRING_DATASOURCE_PASSWORD, SPRING_DATASOURCE_URL, SERVER_PORT, and everything else.
+    # All of them are needed by the Spring Boot app — no need to re-list any of them below.
+    env_file: .env
+
+    # Only ONE override is needed here — and it is a genuine override, not a repeat.
+    # SPRING_DATASOURCE_URL in .env has "localhost:3306" — correct for bare-metal but WRONG in Docker.
+    # In Docker Compose, each service is an isolated container. "localhost" inside the web container
+    # refers to the web container itself — not the db container.
+    # The correct hostname is the Compose service name: "db".
+    # This single environment: entry OVERRIDES the value from .env for this container only.
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+
+    ports:
+      - "${SERVER_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy    # Wait for MySQL healthcheck to PASS — not just container start
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8000/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # 60s: Spring Boot + MySQL JPA connection on cold start takes 45-60s
+      # With start_period=30s, healthcheck fires too early and marks container unhealthy on first boot
+      start_period: 60s
+
+# ── Named Volumes ──────────────────────────────────────────────
+volumes:
+  mysql_data:
+    driver: local
+
+# ── Networks ───────────────────────────────────────────────────
+networks:
+  app-network:
+    driver: bridge
+    
