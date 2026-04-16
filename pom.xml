@@ -109,10 +109,19 @@
 		    New artifact: com.mysql:mysql-connector-j
 		    No <version> tag — Spring Boot BOM manages compatibility automatically
 		-->
+
+		<!-- MySQL (production / Docker Compose) -->
 		<dependency>
-			<groupId>com.mysql</groupId>
-			<artifactId>mysql-connector-j</artifactId>
-			<scope>runtime</scope>
+    		<groupId>com.mysql</groupId>
+    		<artifactId>mysql-connector-j</artifactId>
+    		<scope>runtime</scope>
+		</dependency>
+
+		<!-- H2 (local development / testing — in-memory, no server needed) -->
+		<dependency>
+    		<groupId>com.h2database</groupId>
+    		<artifactId>h2</artifactId>
+    		<scope>runtime</scope>
 		</dependency>
 
 		<!-- Unit testing -->
