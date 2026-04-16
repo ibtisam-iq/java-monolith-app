@@ -7,7 +7,7 @@ This is a Java Spring Boot-based monolithic banking web application serving as t
 - **[DevSecOps Pipelines](https://github.com/ibtisam-iq/devsecops-pipelines)** — CI/CD pipelines that build, scan, and package this application into a secure, deployable artifact using Jenkins, GitHub Actions, Docker, SonarQube, and Trivy.
 - **[Platform Engineering Systems](https://github.com/ibtisam-iq/platform-engineering-systems)** — Deployment workflows that run this artifact across Docker Compose, AWS EC2, EKS (Kubernetes), Terraform, and GitOps-based delivery.
 
-> I did not build this application from scratch. As a DevOps Engineer, my focus is on everything that happens **around the code** — building, securing, packaging, and operating it in production-like environments.
+> The application source code was not written from scratch. As a DevOps Engineer, the focus here is on everything that happens **around the code** — building, securing, packaging, and operating it in production-like environments. The following files were added to this repository as part of that work: `Dockerfile`, `compose.yml`, `.dockerignore`, and `.gitignore`. Everything else under `src/` belongs to the original developer.
 
 ---
 
@@ -20,6 +20,10 @@ java-monolith-app/
 │       ├── java/com/example/bankapp/   # Controllers, Services, Repositories
 │       └── resources/
 │           └── application.properties  # Reads from environment variables
+├── Dockerfile                          # Multi-stage build: Maven builder → JRE runtime
+├── compose.yml                         # Local containerized environment (app + MySQL)
+├── .dockerignore                       # Excludes target/, .env, IDE files from build context
+├── .gitignore                          # Excludes .env, target/, IDE files from version control
 ├── .env.example                        # Environment variable template
 ├── pom.xml                             # Maven build config (Spring Boot 3.4.4, Java 21)
 └── mvnw                                # Maven wrapper
@@ -41,6 +45,7 @@ Three-tier architecture: Presentation (Controllers/Thymeleaf UI) → Business (S
 | Security | Spring Security |
 | Build Tool | Maven (with Maven Wrapper) |
 | Coverage | JaCoCo |
+| Containerization | Docker (multi-stage) + Docker Compose |
 
 ---
 
@@ -48,9 +53,9 @@ Three-tier architecture: Presentation (Controllers/Thymeleaf UI) → Business (S
 
 ### Step 0 — Codebase Modernization (`pom.xml`)
 
-The inherited codebase was functional but built on outdated dependencies. Before doing any DevOps work, I audited and modernized `pom.xml` to bring it up to current industry standards — because running pipelines on stale, vulnerable dependencies defeats the purpose of DevSecOps.
+The inherited codebase was functional but built on outdated dependencies. Before doing any DevOps work, `pom.xml` was audited and modernized to bring it up to current industry standards — because running pipelines on stale, vulnerable dependencies defeats the purpose of DevSecOps.
 
-> **Note:** Modernizing `pom.xml` is not my primary role as a DevOps Engineer. However, receiving a codebase that cannot build cleanly on current tooling is a real-world scenario. I used **AI-assisted analysis (Perplexity Pro)** to audit the dependency tree, identify outdated and deprecated artifacts, and apply the correct fixes — which is itself a practical DevOps skill: knowing what to fix, and knowing when to use the right tool to fix it efficiently.
+> **Note:** Modernizing `pom.xml` is not a primary DevOps responsibility. However, receiving a codebase that cannot build cleanly on current tooling is a real-world scenario. **AI-assisted analysis (Perplexity Pro)** was used to audit the dependency tree, identify outdated and deprecated artifacts, and apply the correct fixes — which is itself a practical DevOps skill: knowing what to fix, and knowing when to use the right tool to fix it efficiently.
 
 **Changes made:**
 
@@ -61,7 +66,7 @@ The inherited codebase was functional but built on outdated dependencies. Before
 | `groupId` | `com.ibtisam-iq` | `com.ibtisamiq` | Hyphens are invalid in Maven `groupId` — violates Maven naming convention |
 | MySQL connector | `mysql:mysql-connector-java:8.0.33` | `com.mysql:mysql-connector-j` (BOM-managed) | Old artifact is deprecated; new groupId is `com.mysql`, version managed by Spring Boot BOM |
 | JaCoCo | `0.8.7` (2021) + duplicate declaration | `0.8.12`, single declaration in `<plugins>` only | Updated to latest; removed erroneous duplicate entry in `<dependencies>` |
-| Added | — | `spring-boot-starter-actuator` | Provides `/actuator/health` endpoint required for Kubernetes liveness/readiness probes |
+| Added | — | `spring-boot-starter-actuator` | Provides `/actuator/health` endpoint required for Kubernetes liveness/readiness probes and Docker healthchecks |
 | Added | — | `spring-boot-starter-validation` | Jakarta Bean Validation — necessary for any production-grade input handling |
 | SCM / Developer / License | Empty blocks | Filled with project details | Professional standard; visible to anyone who inspects the artifact |
 
@@ -69,7 +74,7 @@ The inherited codebase was functional but built on outdated dependencies. Before
 
 ### Step 1 — Environment Standardization
 
-The original codebase had hardcoded database credentials and app config. I refactored it to use environment variables, making it portable across all environments.
+The original codebase had hardcoded database credentials and app config. These were refactored to use environment variables, making the application portable across all environments — bare-metal, Docker, and Kubernetes alike.
 
 ```bash
 # Copy the template and fill in real values
@@ -90,9 +95,11 @@ SERVER_PORT=8000
 
 ---
 
-### Step 2 — Local Build & Validation
+### Step 2 — Local Build & Containerized Validation
 
-Before building any pipeline, I validated the full application lifecycle locally.
+The full application lifecycle was validated using two methods before any automated pipeline was built: **bare-metal execution** directly on the host machine, and **containerized execution** via Docker Compose. Both are local environments — the distinction is whether MySQL and the JVM run natively on the OS or inside isolated containers.
+
+#### Method 1 — Bare-Metal (Native Execution)
 
 **Install and configure MySQL:**
 
@@ -150,9 +157,57 @@ App runs at: `http://localhost:8000`
 
 ---
 
-### Step 3 — DevSecOps Pipelines (CI/CD)
+#### Method 2 — Containerized (Docker Compose)
 
-With the application validated locally, I built automated pipelines to transform this code into a secure, deployable artifact.
+Docker Compose spins up both the MySQL database and the Spring Boot application as isolated containers on a shared internal network — no local MySQL installation required.
+
+**Prerequisites:** Docker and Docker Compose must be installed. The `.env` file must exist (copy from `.env.example` if not already done).
+
+```bash
+cp .env.example .env
+# Fill in values: MYSQL_ROOT_PASSWORD, MYSQL_DATABASE, MYSQL_USER, MYSQL_PASSWORD, SERVER_PORT
+```
+
+**Start the full stack:**
+
+```bash
+docker compose up --build
+```
+
+> `--build` forces the Docker image to be rebuilt from the `Dockerfile`. Omit it on subsequent runs if the source code has not changed.
+
+**What happens in sequence:**
+1. Docker builds the `java-monolith-bankapp` image using the multi-stage `Dockerfile`
+2. The `db` container (MySQL 8.4) starts and runs its healthcheck (`mysqladmin ping -h localhost`)
+3. The `web` container waits for the `db` healthcheck to pass (`condition: service_healthy`)
+4. Spring Boot connects to MySQL using the service name `db` as the hostname (overrides `localhost` from `.env`)
+5. The app becomes available at `http://localhost:8000`
+
+**Stop and clean up:**
+
+```bash
+# Stop containers but keep the database volume
+docker compose down
+
+# Stop containers AND delete the database volume (full reset)
+docker compose down -v
+```
+
+> See [`docs/docker-setup.md`](docs/docker-setup.md) for a complete explanation of every decision in the `Dockerfile` and `compose.yml` — including layer caching strategy, JVM container flags, healthcheck design, and the `env_file` vs `environment:` override pattern.
+
+---
+
+### Step 3 — Containerization (Docker)
+
+Before moving to automated pipelines, the application was packaged as a production-grade Docker image. This step covers writing the `Dockerfile` and `compose.yml` — including the decisions behind multi-stage builds, non-root user security, JVM container-awareness flags, and the healthcheck design.
+
+The full rationale for every line is documented in [`docs/docker-setup.md`](docs/docker-setup.md).
+
+---
+
+### Step 4 — DevSecOps Pipelines (CI/CD)
+
+With the application validated both natively and in containers, automated pipelines were built to transform this code into a secure, deployable artifact.
 
 Pipelines include: Maven build → SonarQube analysis → Trivy vulnerability scan → Docker image build → Nexus artifact management → Jenkins & GitHub Actions automation.
 
@@ -160,9 +215,9 @@ Pipelines include: Maven build → SonarQube analysis → Trivy vulnerability sc
 
 ---
 
-### Step 4 — Platform Engineering (Deployment & Operations)
+### Step 5 — Platform Engineering (Deployment & Operations)
 
-Once the artifact was ready, I deployed it using multiple industry-standard approaches.
+Once the artifact was ready, deployment was handled using multiple industry-standard approaches.
 
 Deployment targets: Local JAR · Docker Compose · AWS EC2 · EKS (Kubernetes) · Terraform-provisioned infrastructure.
 
