@@ -150,7 +150,7 @@ server.port=${SERVER_PORT}
 
 > **`spring.sql.init.mode=embedded`** — tells Spring Boot to only run SQL init scripts when using an embedded database like H2. This is the correct value for H2. For MySQL, use `always` or `never` depending on whether you have init scripts.
 
-> **`spring.datasource.initialization-mode=always`** is a Spring Boot 2.x property that was removed in Spring Boot 3.x. This project uses Spring Boot 3.4.4. Remove that line entirely to avoid a warning at startup.
+> **`spring.datasource.initialization-mode=always`** is a Spring Boot 2.x property that was removed in Spring Boot 3.x. This project uses Spring Boot 3.4.4. Remove that line entirely to avoid a warning at startup. REMOVED.
 
 ***
 
