@@ -1,0 +1,41 @@
+# ============================================================
+# .dockerignore — Exclude files from Docker build context
+# Reduces image size, prevents secrets leaking into image layers,
+# and speeds up docker build by shrinking the context sent to daemon.
+# ============================================================
+
+# ── Git ────────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+.gitmodules
+
+# ── Maven build output — rebuilt inside Docker by Maven ────────
+target/
+
+# ── IDE and editor files ───────────────────────────────────────
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# ── Environment files — NEVER bake secrets into images ─────────
+.env
+.env.*
+!.env.example            # Exception: allow the example template (no real secrets)
+
+# ── Docker files themselves (not needed inside the image) ──────
+Dockerfile
+compose.yml
+.dockerignore
+
+# ── Documentation and assets (not needed at runtime) ───────────
+README.md
+docs/
+assets/
+.scratchpad/  
+
+# ── Test and coverage reports ──────────────────────────────────
+*.log
