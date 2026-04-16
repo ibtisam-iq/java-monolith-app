@@ -95,11 +95,9 @@ SERVER_PORT=8000
 
 ---
 
-### Step 2 — Local Build & Containerized Validation
+### Step 2 — Local Build & Bare-Metal Validation
 
-Before building any pipeline, I validated the full application lifecycle using two methods: **bare-metal execution** directly on the host machine, and **containerized execution** via Docker Compose. Both are local environments — the distinction is whether MySQL and the JVM run natively on the OS or inside isolated containers.
-
-#### Method 1 — Bare-Metal (Native Execution)
+Before writing any Docker config, I validated the application locally on the host machine — native MySQL, native JVM, no containers. This confirmed the build was clean and the app connected to the database correctly before I introduced any containerization layer.
 
 **Install and configure MySQL:**
 
@@ -123,17 +121,13 @@ EXIT;
 **Verify MySQL is running and the database exists:**
 
 ```bash
-# Check MySQL is running
 sudo systemctl status mysql
-
-# Confirm the database exists
 mysql -u your_db_user -p -e "SHOW DATABASES;" | grep IbtisamIQbankappdb
 ```
 
 **Build the artifact:**
 
 ```bash
-# Build the JAR (skip tests for speed)
 ./mvnw clean package -DskipTests
 ```
 
@@ -142,7 +136,6 @@ Output artifact: `target/bankapp-0.0.1-SNAPSHOT.jar`
 **Run the application:**
 
 ```bash
-# Load env vars and run — all in one command
 set -a && source .env && set +a && java -jar target/bankapp-0.0.1-SNAPSHOT.jar
 ```
 
@@ -157,20 +150,22 @@ App runs at: `http://localhost:8000`
 
 ---
 
-#### Method 2 — Containerized (Docker Compose)
+### Step 3 — Containerization (Docker)
 
-Docker Compose spins up both the MySQL database and the Spring Boot application as isolated containers on a shared internal network — no local MySQL installation required.
+With the application validated on bare metal, I wrote the `Dockerfile` and `compose.yml` from scratch. I read `pom.xml`, `application.properties`, and `.env.example` before writing a single line — to understand exactly what the image needed: Java version, JAR filename, exposed port, health endpoint, and environment variable strategy.
 
-**Prerequisites:** Docker and Docker Compose must be installed. The `.env` file must exist (copy from `.env.example` if not already done).
+Key decisions I made and documented: multi-stage build to keep the runtime image lean (~165MB vs ~500MB), non-root user for CIS/Trivy compliance, JVM container-awareness flags (`-XX:+UseContainerSupport`) to prevent OOM kills in Kubernetes, and healthcheck timing tuned to Spring Boot's actual cold-start duration.
+
+The full rationale for every line is in [`docs/docker-setup.md`](docs/docker-setup.md).
+
+#### Validating with Docker Compose
+
+After writing the files, I validated them end-to-end using Docker Compose — spinning up both MySQL and the app as containers on a shared internal network, with no local MySQL installation needed.
 
 ```bash
 cp .env.example .env
-# Fill in values: MYSQL_ROOT_PASSWORD, MYSQL_DATABASE, MYSQL_USER, MYSQL_PASSWORD, SERVER_PORT
-```
+# Fill in: MYSQL_ROOT_PASSWORD, MYSQL_DATABASE, MYSQL_USER, MYSQL_PASSWORD, SERVER_PORT
 
-**Start the full stack:**
-
-```bash
 docker compose up --build
 ```
 
@@ -192,18 +187,6 @@ docker compose down
 # Stop containers AND delete the database volume (full reset)
 docker compose down -v
 ```
-
-> See [`docs/docker-setup.md`](docs/docker-setup.md) for a complete explanation of every decision in the `Dockerfile` and `compose.yml` — including layer caching strategy, JVM container flags, healthcheck design, and the `env_file` vs `environment:` override pattern.
-
----
-
-### Step 3 — Containerization (Docker)
-
-Before moving to automated pipelines, I packaged the application as a production-grade Docker image. I wrote the `Dockerfile` and `compose.yml` from scratch after reading the project code — `pom.xml`, `application.properties`, and `.env.example` — to understand exactly what the image needed: Java version, JAR filename, port, health endpoint, and environment variable strategy.
-
-Key decisions I made and documented: multi-stage build to keep the runtime image lean (~165MB vs ~500MB), non-root user for CIS/Trivy compliance, JVM container-awareness flags (`-XX:+UseContainerSupport`) to prevent OOM kills in Kubernetes, and healthcheck timing tuned to Spring Boot's actual cold-start duration.
-
-The full rationale for every line is in [`docs/docker-setup.md`](docs/docker-setup.md).
 
 ---
 
