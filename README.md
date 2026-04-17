@@ -7,9 +7,7 @@ This is a Java Spring Boot-based monolithic banking web application serving as t
 - **[DevSecOps Pipelines](https://github.com/ibtisam-iq/devsecops-pipelines)** — CI/CD pipelines that build, scan, and package this application into a secure, deployable artifact using Jenkins, GitHub Actions, Docker, SonarQube, and Trivy.
 - **[Platform Engineering Systems](https://github.com/ibtisam-iq/platform-engineering-systems)** — Deployment workflows that run this artifact across Docker Compose, AWS EC2, EKS (Kubernetes), Terraform, and GitOps-based delivery.
 
-> I did not write this application from scratch. As a DevOps Engineer, my focus is on everything that happens **around the code** — building, securing, packaging, and operating it in production-like environments.
-
-> The files I added to this repository are: `Dockerfile`, `compose.yml`, `.dockerignore`, and `.gitignore`. Everything else under `src/` belongs to the original developer.
+> I did not write this application from scratch. As a DevOps Engineer, my focus is on everything that happens **around the code** — building, securing, packaging, and operating it in production-like environments. The files I added to this repository are: `Dockerfile`, `compose.yml`, `.dockerignore`, and `.gitignore`. Everything else under `src/` belongs to the original developer.
 
 ---
 
@@ -42,7 +40,7 @@ Three-tier architecture: Presentation (Controllers/Thymeleaf UI) → Business (S
 | Language | Java 21 |
 | Framework | Spring Boot 3.4.4 |
 | Persistence | Spring Data JPA + Hibernate |
-| Database | MySQL |
+| Database | MySQL (production) / H2 (local dev) |
 | Web Server | Embedded Tomcat (port 8000) |
 | Security | Spring Security |
 | Build Tool | Maven (with Maven Wrapper) |
@@ -55,24 +53,9 @@ Three-tier architecture: Presentation (Controllers/Thymeleaf UI) → Business (S
 
 ### Step 0 — Codebase Modernization (`pom.xml`)
 
-The inherited codebase was functional but built on outdated dependencies. Before doing any DevOps work, I audited and modernized `pom.xml` to bring it up to current industry standards — because running pipelines on stale, vulnerable dependencies defeats the purpose of DevSecOps.
+Before doing any DevOps work, I audited and modernized `pom.xml` — upgrading to Spring Boot 3.4.4, Java 21 (LTS), fixing an invalid `groupId`, replacing the deprecated MySQL connector, adding H2 for local dev flexibility, and adding `spring-boot-starter-actuator` for Docker and Kubernetes health probes.
 
-> **Note:** Modernizing `pom.xml` is not my primary role as a DevOps Engineer. However, receiving a codebase that cannot build cleanly on current tooling is a real-world scenario.
-
-> I used **AI-assisted analysis (Perplexity Pro)** to audit the dependency tree, identify outdated and deprecated artifacts, and apply the correct fixes.
-
-**Changes made:**
-
-| What | Before | After | Why |
-|---|---|---|---|
-| Spring Boot | `3.3.3` | `3.4.4` | 3.3.x reached end of OSS support; 3.4.x has security patches and Java 21 improvements |
-| Java version | `17` | `21` | Java 21 is the current LTS (supported until 2028); virtual threads, record patterns |
-| `groupId` | `com.ibtisam-iq` | `com.ibtisamiq` | Hyphens are invalid in Maven `groupId` — violates Maven naming convention |
-| MySQL connector | `mysql:mysql-connector-java:8.0.33` | `com.mysql:mysql-connector-j` (BOM-managed) | Old artifact is deprecated; new groupId is `com.mysql`, version managed by Spring Boot BOM |
-| JaCoCo | `0.8.7` (2021) + duplicate declaration | `0.8.12`, single declaration in `<plugins>` only | Updated to latest; removed erroneous duplicate entry in `<dependencies>` |
-| Added | — | `spring-boot-starter-actuator` | Provides `/actuator/health` endpoint required for Kubernetes liveness/readiness probes and Docker healthchecks |
-| Added | — | `spring-boot-starter-validation` | Jakarta Bean Validation — necessary for any production-grade input handling |
-| SCM / Developer / License | Empty blocks | Filled with project details | Professional standard; visible to anyone who inspects the artifact |
+> I used AI-assisted analysis (Perplexity Pro) for this step. Full change log with rationale: [`docs/pom-modernization.md`](docs/pom-modernization.md)
 
 ---
 
@@ -158,12 +141,7 @@ App runs at: `http://localhost:8000`
 
 With the application validated on bare metal, I wrote the `Dockerfile` and `compose.yml` from scratch. I read `pom.xml`, `application.properties`, and `.env.example` before writing a single line — to understand exactly what the image needed: Java version, JAR filename, exposed port, health endpoint, and environment variable strategy.
 
-**Key decisions I made and documented:**
-
-- Multi-stage build to keep the runtime image lean (~190MB vs ~600MB)
-- Non-root user for CIS/Trivy compliance
-- JVM container-awareness flags (`-XX:+UseContainerSupport`) to prevent OOM kills in Kubernetes
-- Healthcheck timing tuned to Spring Boot's actual cold-start duration
+Key decisions I made and documented: multi-stage build to keep the runtime image lean (~165MB vs ~500MB), non-root user for CIS/Trivy compliance, JVM container-awareness flags (`-XX:+UseContainerSupport`) to prevent OOM kills in Kubernetes, and healthcheck timing tuned to Spring Boot's actual cold-start duration.
 
 The full rationale for every line is in [`docs/docker-setup.md`](docs/docker-setup.md).
 
