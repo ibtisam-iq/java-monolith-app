@@ -9,7 +9,7 @@ name: bankapp
 
 services:
 
-  # ── MySQL Database ──────────────────────────────────────────
+  # ── MySQL Database ─────────────────────────────────────────────────
   db:
     image: mysql:8.4          # 8.4: current LTS (mysql:8 / 8.0 reached EOL April 2026)
     container_name: mysql-db
@@ -41,7 +41,7 @@ services:
       retries: 5
       start_period: 30s
 
-  # ── Spring Boot Application ─────────────────────────────────
+  # ── Spring Boot Application ───────────────────────────────────────
   web:
     build:
       context: .                    # java-monolith-app repo root
@@ -66,14 +66,16 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/${MYSQL_DATABASE}?useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
 
     ports:
-      - "${SERVER_PORT:-8000}:8000"
+      # Both sides use ${SERVER_PORT:-8000} so they always match — even if SERVER_PORT is changed in .env.
+      # Previously the right side was hardcoded to 8000 — inconsistent if SERVER_PORT was overridden.
+      - "${SERVER_PORT:-8000}:${SERVER_PORT:-8000}"
     depends_on:
       db:
         condition: service_healthy    # Wait for MySQL healthcheck to PASS — not just container start
     networks:
       - app-network
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8000/actuator/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:${SERVER_PORT:-8000}/actuator/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -81,13 +83,12 @@ services:
       # With start_period=30s, healthcheck fires too early and marks container unhealthy on first boot
       start_period: 60s
 
-# ── Named Volumes ──────────────────────────────────────────────
+# ── Named Volumes ───────────────────────────────────────────────────────
 volumes:
   mysql_data:
     driver: local
 
-# ── Networks ───────────────────────────────────────────────────
+# ── Networks ────────────────────────────────────────────────────────────
 networks:
   app-network:
     driver: bridge
-    

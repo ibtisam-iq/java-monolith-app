@@ -55,14 +55,18 @@ RUN chown appuser:appgroup app.jar
 # Switch to non-root user — passes CIS Docker Benchmark & Trivy hardening checks
 USER appuser
 
-# Expose the application port (matches SERVER_PORT in .env)
-EXPOSE 8000
+# SERVER_PORT is read from the environment at runtime via .env or compose.yml.
+# ARG sets the build-time default; ENV makes it available at runtime.
+# EXPOSE reflects the actual port the container listens on — never hardcoded.
+ARG SERVER_PORT=8000
+ENV SERVER_PORT=${SERVER_PORT}
+EXPOSE ${SERVER_PORT}
 
 # Health check using Spring Boot Actuator — /actuator/health
 # --start-period=60s: Spring Boot + MySQL JPA startup can take 45-60s on cold start
 # wget is available on Alpine; curl is NOT (never use curl in Alpine-based images)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8000/actuator/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:${SERVER_PORT:-8000}/actuator/health || exit 1
 
 # JVM container-awareness flags — CRITICAL for Kubernetes/ECS/Docker deployments:
 # -XX:+UseContainerSupport  : JVM reads cgroup limits, NOT host RAM (e.g., 16GB host → 512MB container)
@@ -74,4 +78,3 @@ ENTRYPOINT ["java", \
     "-XX:MaxRAMPercentage=75.0", \
     "-Djava.security.egd=file:/dev/./urandom", \
     "-jar", "app.jar"]
-    
