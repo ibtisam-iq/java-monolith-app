@@ -18,8 +18,8 @@
 	<artifactId>bankapp</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
 	<name>BankApp</name>
-	<description>Banking Web Application — DevSecOps Portfolio Project by ibtisam-iq</description>
-	<url>https://github.com/ibtisam-iq/java-app-multi-deployment</url>
+	<description>Banking Web Application — Project by ibtisam-iq</description>
+	<url>https://github.com/ibtisam-iq/java-monolith-app</url>
 
 	<licenses>
 		<license>
@@ -177,11 +177,11 @@
 	<distributionManagement>
 		<repository>
 			<id>maven-releases</id>
-			<url>NEXUS-URL/repository/maven-releases/</url>
+			<url>https://nexus.ibtisam-iq.com/repository/maven-releases/</url>
 		</repository>
 		<snapshotRepository>
 			<id>maven-snapshots</id>
-			<url>NEXUS-URL/repository/maven-snapshots/</url>
+			<url>https://nexus.ibtisam-iq.com/repository/maven-snapshots/</url>
 		</snapshotRepository>
 	</distributionManagement>
 </project>
