@@ -39,21 +39,24 @@
 		</developer>
 	</developers>
 
-	<scm>
-		<connection>scm:git:https://github.com/ibtisam-iq/java-app-multi-deployment.git</connection>
-		<developerConnection>scm:git:git@github.com:ibtisam-iq/java-app-multi-deployment.git</developerConnection>
-		<url>https://github.com/ibtisam-iq/java-app-multi-deployment</url>
-		<tag>HEAD</tag>
-	</scm>
+  <scm>
+    <connection>scm:git:https://github.com/ibtisam-iq/java-monolith-app.git</connection>
+    <developerConnection>scm:git:git@github.com:ibtisam-iq/java-monolith-app.git</developerConnection>
+    <url>https://github.com/ibtisam-iq/java-monolith-app</url>
+    <tag>HEAD</tag>
+  </scm>
 
 	<properties>
         <!-- Java 21: current LTS, supported until 2028 (replaces Java 17) -->
 		<java.version>21</java.version>
         <!-- JaCoCo 0.8.12: latest stable (0.8.7 was from 2021) -->
 		<jacoco.version>0.8.12</jacoco.version>
+
+		<!--
 		<sonar.java.coveragePlugin>jacoco</sonar.java.coveragePlugin>
 		<sonar.dynamicAnalysis>reuseReports</sonar.dynamicAnalysis>
 		<sonar.jacoco.reportPath>${project.basedir}/../target/jacoco.exec</sonar.jacoco.reportPath>
+		-->
 		<sonar.language>java</sonar.language>
 	</properties>
 
@@ -147,28 +150,30 @@
 				<artifactId>spring-boot-maven-plugin</artifactId>
 			</plugin>
 
-			<!--
-			    JaCoCo for code coverage reports.
-			    NOTE: This plugin belongs ONLY here in <build><plugins>.
-			    It was incorrectly duplicated in <dependencies> — that has been removed.
-			-->
+			<!-- JaCoCo for code coverage reports -->
 			<plugin>
 				<groupId>org.jacoco</groupId>
 				<artifactId>jacoco-maven-plugin</artifactId>
 				<version>${jacoco.version}</version>
 				<executions>
-					<execution>
-						<goals>
-							<goal>prepare-agent</goal>
-						</goals>
-					</execution>
-					<execution>
-						<id>report</id>
-						<phase>test</phase>
-						<goals>
-							<goal>report</goal>
-						</goals>
-					</execution>
+
+          <!-- 1. Instrument JVM agent before tests run -->
+          <execution>
+            <id>prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+
+          <!-- 2. Generate report AFTER tests complete (phase: test) -->
+          <execution>
+            <id>report</id>
+            <phase>test</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+
 				</executions>
 			</plugin>
 		</plugins>
