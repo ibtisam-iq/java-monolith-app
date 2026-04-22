@@ -11,8 +11,6 @@ This is a Java Spring Boot-based monolithic banking web application serving as t
 
 > I did not write this application from scratch. As a DevOps Engineer, my focus is on everything that happens **around the code** — building, securing, packaging, and operating it in production-like environments.
 
-> The files I added to this repository are: `Dockerfile`, `compose.yml`, `.dockerignore`, `.gitignore`, and `.github/workflows/ci.yml`. Everything else under `src/` belongs to the original developer.
-
 ---
 
 ## Application Structure
