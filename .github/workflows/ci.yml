@@ -291,29 +291,34 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 9 — Docker Build
-      # Plain `docker build` is used intentionally — NOT docker/build-push-action.
-      # Reason: build-push-action with load:true uses BuildKit's internal store,
-      # which is NOT accessible to the Docker daemon. Trivy (Stage 10) scans via
-      # the Docker daemon, so the image must land there.
-      # Plain docker build writes directly to the Docker daemon — Trivy can see it.
-      # push: false at this stage — push happens AFTER Trivy passes (Stages 11-13).
-      # See docs/trivy-troubleshooting.md for the full investigation.
+      # load: true  → image loaded into local daemon for Trivy scan
+      # push: false → push happens AFTER Trivy passes (Stages 11-13)
       # ──────────────────────────────────────────────────────
-      - name: Docker Build — build image into local daemon for Trivy scan
-        run: |
-          docker build \
-            --build-arg SERVER_PORT=8000 \
-            --label "org.opencontainers.image.version=${{ steps.versioning.outputs.image_tag }}" \
-            --label "org.opencontainers.image.revision=${{ github.sha }}" \
-            --label "org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}" \
-            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
-            -t ${{ env.IMAGE_NAME }}:$IMAGE_TAG \
-            -t ${{ env.IMAGE_NAME }}:latest \
-            -t ${{ env.GHCR_IMAGE }}:$IMAGE_TAG \
-            -t ${{ env.GHCR_IMAGE }}:latest \
-            -t ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:$IMAGE_TAG \
-            -t ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest \
-            ${{ env.APP_DIR }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker Build — build image (load into daemon for scan + push)
+        uses: docker/build-push-action@v6
+        with:
+          context:  ${{ env.APP_DIR }}
+          push:     false
+          load:     true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.GHCR_IMAGE }}:${{ steps.versioning.outputs.image_tag }}
+            ${{ env.GHCR_IMAGE }}:latest
+            ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:${{ steps.versioning.outputs.image_tag }}
+            ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest
+          build-args: |
+            SERVER_PORT=8000
+          labels: |
+            org.opencontainers.image.version=${{ steps.versioning.outputs.image_tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to:   type=gha,mode=max
 
       # ──────────────────────────────────────────────────────
       # STAGE 10 — Trivy Image Scan
