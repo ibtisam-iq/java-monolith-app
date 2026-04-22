@@ -224,7 +224,7 @@ With the application containerized and the registry strategy confirmed, I moved 
 The build fails hard on three conditions: Trivy finds CRITICAL CVEs in JAR dependencies, SonarQube Quality Gate does not pass, or any unit test fails.
 
 > **Jenkins Pipeline — Build #12 — All 14 stages passed**
-> ![Jenkins pipeline all 14 stages passed](docs/assets/jenkins-pipeline-success.png)
+> ![Jenkins pipeline all 14 stages passed](assets/jenkins-pipeline-success.png)
 
 #### Jenkins
 
