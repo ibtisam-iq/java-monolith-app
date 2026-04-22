@@ -4,12 +4,11 @@
 
 ## Overview
 
-This is a Java Spring Boot-based monolithic banking web application serving as the **source codebase** for two downstream DevOps projects:
-
-- **[DevSecOps Pipelines](https://github.com/ibtisam-iq/devsecops-pipelines)** — CI/CD pipelines that build, scan, and package this application into a secure, deployable artifact using Jenkins, GitHub Actions, Docker, SonarQube, and Trivy.
-- **[Platform Engineering Systems](https://github.com/ibtisam-iq/platform-engineering-systems)** — Deployment workflows that run this artifact across Docker Compose, AWS EC2, EKS (Kubernetes), Terraform, and GitOps-based delivery.
+This is a Java Spring Boot-based monolithic banking web application that I used as the base for practising and implementing real-world DevOps engineering — from codebase modernization and containerization to full CI/CD pipelines and production-grade deployments.
 
 > I did not write this application from scratch. As a DevOps Engineer, my focus is on everything that happens **around the code** — building, securing, packaging, and operating it in production-like environments.
+
+> Everything under `src/` and the original `pom.xml` structure belong to the original developer. Every other file in this repository — `Jenkinsfile`, `.github/workflows/ci.yml`, `Dockerfile`, `compose.yml`, `.dockerignore`, `.gitignore`, `.env.example`, and all `pom.xml` modernization — was written by me.
 
 ---
 
@@ -26,6 +25,7 @@ java-monolith-app/
 │       └── resources/
 │           └── application.properties  # Reads from environment variables
 ├── Dockerfile                          # Multi-stage build: Maven builder → JRE runtime
+├── Jenkinsfile                         # Jenkins declarative CI pipeline (14 stages)
 ├── compose.yml                         # Local containerized environment (app + MySQL)
 ├── .dockerignore                       # Excludes target/, .env, IDE files from build context
 ├── .gitignore                          # Excludes .env, target/, IDE files from version control
@@ -151,7 +151,7 @@ With the application validated on bare metal, I wrote the `Dockerfile` and `comp
 - Multi-stage build to keep the runtime image lean (~190MB vs ~600MB)
 - Non-root user for CIS/Trivy compliance
 - JVM container-awareness flags (`-XX:+UseContainerSupport`) to prevent OOM kills in Kubernetes
-- Healthcheck timing tuned to Spring Boot's actual cold-start duration.
+- Healthcheck timing tuned to Spring Boot's actual cold-start duration
 
 The full rationale for every line is in [`docs/docker-setup.md`](docs/docker-setup.md).
 
@@ -189,29 +189,36 @@ docker compose down -v
 
 ### Step 4 — DevSecOps Pipelines (CI/CD)
 
-With the application validated both natively and in containers, I built automated pipelines to transform this code into a secure, deployable artifact.
+With the application containerized and validated, I built two automated CI/CD pipelines — one for self-hosted Jenkins infrastructure, one for GitHub Actions — both living directly in this repository and covering the same 14 DevSecOps stages.
 
 #### Jenkins
 
-The Jenkins pipeline is defined in the [DevSecOps Pipelines](https://github.com/ibtisam-iq/devsecops-pipelines/tree/main/pipelines/java-monolith) repository, where this app is linked as a Git submodule. Jenkins checks out that entire repo (with submodules) and runs `pipelines/java-monolith/jenkins/Jenkinsfile`.
+I wrote `Jenkinsfile` at the root of this repository using Jenkins declarative pipeline syntax. The pipeline runs 14 stages in sequence: Trivy filesystem scan → Maven build & test → JaCoCo coverage → SonarQube static analysis → Quality Gate → Nexus JAR publish → Docker image build → Trivy image scan → Push to Docker Hub → Push to GHCR → Push to Nexus Docker registry → Tag & version → Notify → Trigger CD.
+
+I kept the pipeline declarative throughout — no scripted blocks, no shared libraries — so any Jenkins instance can execute it by pointing a job at this repository with `Jenkinsfile` as the script path.
 
 #### GitHub Actions
 
-The GitHub Actions workflow lives **here**, in this repository, at `.github/workflows/ci.yml`. This is an intentional placement decision: the `ci.yml` always belongs to the application source repo — it triggers on commits to this repo and needs no submodule setup because the code is already at the root.
+I wrote `.github/workflows/ci.yml` to cover the identical 14 stages. It triggers automatically on every push and pull request to `main`, running on a GitHub-hosted runner with no server provisioning required.
 
-A reference copy is maintained in the pipelines repo at `pipelines/java-monolith/github-actions/ci.yml` for documentation and comparison purposes.
+Both pipelines enforce the same quality gates: the build fails if Trivy finds CRITICAL vulnerabilities, if SonarQube Quality Gate does not pass, or if any test fails — whichever comes first.
 
-Both pipelines cover the same 14 DevSecOps stages: Trivy FS scan → Build & Test → SonarQube → Quality Gate → Nexus JAR publish → Docker build → Trivy image scan → Push to Docker Hub / GHCR / Nexus → Update CD repo.
+#### Why Both Pipelines?
 
-👉 **Pipelines repository:** [DevSecOps Pipelines](https://github.com/ibtisam-iq/devsecops-pipelines/tree/main/pipelines/java-monolith)
+| Pipeline | Purpose |
+|---|---|
+| **Jenkins** | Self-hosted, enterprise-grade orchestration — full control over agents, credentials, plugins, and infrastructure |
+| **GitHub Actions** | Cloud-native, zero-infra CI — triggers on every push with no server to maintain |
 
-#### docker Images
+Both produce the same output: a versioned, scanned Docker image published to three registries and a JAR artifact stored in Nexus.
+
+#### Built Docker Images
 
 ```text
 ibtisam@dev-machine:~ $ docker images
-IMAGE                                                     ID             DISK USAGE   CONTENT SIZE   EXTRA
-ghcr.io/ibtisam-iq/java-monolith:latest                   88a727976b14        621MB          186MB        
-mibtisam/java-monolith:latest                             88a727976b14        621MB          186MB        
+IMAGE                                                     ID             DISK USAGE   CONTENT SIZE
+ghcr.io/ibtisam-iq/java-monolith:latest                   88a727976b14        621MB          186MB
+mibtisam/java-monolith:latest                             88a727976b14        621MB          186MB
 nexus.ibtisam-iq.com/docker-hosted/java-monolith:latest   88a727976b14        621MB          186MB
 ```
 
@@ -235,8 +242,7 @@ Also covered: monitoring, observability, scaling strategies, and system reliabil
 
 | Repository | Role |
 |---|---|
-| **This repo** | Application source code — the single input to everything below |
-| **[DevSecOps Pipelines](https://github.com/ibtisam-iq/devsecops-pipelines)** | CI/CD — builds, scans, and packages the code into a deployable artifact |
+| **This repo** | Application source code + all CI/CD pipeline definitions (Jenkins, GitHub Actions) |
 | **[Platform Engineering Systems](https://github.com/ibtisam-iq/platform-engineering-systems)** | Platform — deploys, operates, and scales the artifact across multiple targets |
 
-This separation is intentional: one repo per concern. The source code stays clean, the pipeline logic stays auditable, and the deployment configs stay independently versioned.
+This separation is intentional: pipeline logic lives with the code it builds, and deployment configs stay independently versioned in their own repo.
