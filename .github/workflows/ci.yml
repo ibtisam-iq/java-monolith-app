@@ -26,11 +26,22 @@ name: DevSecOps CI — Java Monolith
 on:
   push:
     branches: [main]
-    paths:
-      - '**'
-      - '.github/workflows/ci.yml'
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - 'assets/**'
+      - '.env.example'
+      - '.gitignore'
+      - 'compose.yml'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - 'docs/**'
+      - 'assets/**'
+      - '.env.example'
+      - '.gitignore'
+      - 'compose.yml'
   workflow_dispatch:
 
 # Minimal top-level permissions — every job declares only what it needs
