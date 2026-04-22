@@ -1,6 +1,17 @@
 # Java Monolith Application
 
-[![DevSecOps CI — Java Monolith](https://github.com/ibtisam-iq/java-monolith-app/actions/workflows/ci.yml/badge.svg)](https://github.com/ibtisam-iq/java-monolith-app/actions/workflows/ci.yml)
+<!-- CI/CD Status -->
+[![DevSecOps CI](https://github.com/ibtisam-iq/java-monolith-app/actions/workflows/ci.yml/badge.svg)](https://github.com/ibtisam-iq/java-monolith-app/actions/workflows/ci.yml)
+[![Docker Hub](https://img.shields.io/docker/pulls/mibtisam/java-monolith?logo=docker&label=Docker%20Hub&logoColor=white)](https://hub.docker.com/r/mibtisam/java-monolith)
+[![GHCR](https://img.shields.io/badge/GHCR-Available-brightgreen?logo=github&logoColor=white)](https://github.com/ibtisam-iq/java-monolith-app/pkgs/container/java-monolith)
+
+<!-- Stack -->
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.5-6DB33F?logo=springboot&logoColor=white)](pom.xml)
+[![Java](https://img.shields.io/badge/Java-21%20LTS-ED8B00?logo=openjdk&logoColor=white)](pom.xml)
+[![Jenkins](https://img.shields.io/badge/Jenkins-Declarative%20Pipeline-D24939?logo=jenkins&logoColor=white)](Jenkinsfile)
+[![Trivy](https://img.shields.io/badge/Trivy-CVE%20Scanned-1904DA?logo=aquasecurity&logoColor=white)](docs/trivy-troubleshooting.md)
+[![SonarQube](https://img.shields.io/badge/SonarQube-Quality%20Gate-4E9BCD?logo=sonarqube&logoColor=white)](docs/sonarqube-troubleshooting.md)
+[![Nexus](https://img.shields.io/badge/Nexus-Artifact%20Registry-1B9640?logo=sonatype&logoColor=white)](https://nexus.ibtisam-iq.com)
 
 ## Overview
 
