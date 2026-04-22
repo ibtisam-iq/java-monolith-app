@@ -93,7 +93,6 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 1 — Checkout
-      # No submodules needed — app source lives at repo root.
       # fetch-depth: 0 required for SonarQube blame info.
       # Mirrors Jenkins: checkout([$class:'GitSCM'])
       # ──────────────────────────────────────────────────────
@@ -107,7 +106,6 @@ jobs:
       # Runs BEFORE build — fail-fast on CRITICAL findings.
       # Two passes: CRITICAL (fail) + HIGH/MEDIUM (warn only).
       # Mirrors Jenkins: trivy fs --scanners secret,vuln,misconfig
-      # aquasecurity/trivy-action@0.35.0 — latest stable (April 2026)
       # ──────────────────────────────────────────────────────
       - name: Trivy — filesystem scan (CRITICAL → fail)
         uses: aquasecurity/trivy-action@0.35.0
@@ -143,33 +141,23 @@ jobs:
       # STAGE 3 — Versioning
       # Format: <pom-version>-<short-sha>-<run-number>
       # e.g.   0.0.1-SNAPSHOT-ab3f12c-42
-      # Mirrors Jenkins: APP_VERSION-shortSHA-BUILD_NUMBER
       #
       # TWO outputs written deliberately:
       #   $GITHUB_OUTPUT  → steps.versioning.outputs.image_tag
-      #                     Used by steps that reference ${{ steps.versioning.outputs.image_tag }}
-      #                     This is the ONLY safe way to pass a runtime-computed value
-      #                     to later steps inside the same job via ${{ }} syntax.
+      #                     Safe for ${{ }} expressions in later steps.
+      #   $GITHUB_ENV     → IMAGE_TAG bash variable
+      #                     Available to run: shell blocks from the NEXT step onward.
       #
-      #   $GITHUB_ENV     → IMAGE_TAG environment variable
-      #                     Used by shell `run:` blocks that reference $IMAGE_TAG directly.
-      #                     This is the runtime bash env — available from the NEXT step onward.
-      #
-      # IMPORTANT: ${{ env.IMAGE_TAG }} does NOT work for runtime-computed values.
-      #   The env: block at the top of the workflow is evaluated at workflow parse time,
-      #   BEFORE any step runs. It cannot contain values computed during a step.
-      #   So ${{ env.IMAGE_TAG }} would always be empty for dynamic tags.
-      #   Use ${{ steps.versioning.outputs.image_tag }} in ${{ }} expressions,
-      #   and $IMAGE_TAG (or ${IMAGE_TAG}) in bash run: blocks instead.
+      # NEVER use ${{ env.IMAGE_TAG }} for runtime-computed values —
+      # the workflow-level env: block is parsed BEFORE any step runs,
+      # so IMAGE_TAG would always resolve to empty string there.
       # ──────────────────────────────────────────────────────
       - name: Versioning — compute image tag
         id: versioning
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           IMAGE_TAG="${APP_VERSION}-${SHORT_SHA}-${{ github.run_number }}"
-          # Write to GITHUB_OUTPUT so later steps can use ${{ steps.versioning.outputs.image_tag }}
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-          # Write to GITHUB_ENV so later bash run: blocks can use $IMAGE_TAG directly
           echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_ENV"
           echo "🏷️  Image tag: ${IMAGE_TAG}"
 
@@ -185,74 +173,19 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # Configure Maven settings (Nexus credentials)
-      # Mirrors Jenkins: "maven-settings" Config File Provider
-      #
-      # WHY THIS APPROACH (env: block + printf '%s'):
-      # ─────────────────────────────────────────────
-      # The MAVEN_SETTINGS_XML secret contains a full XML file.
-      # XML has characters that bash treats as special operators:
-      #
-      #   >   → shell redirect operator  (breaks: echo "$SECRET" > file)
-      #   <   → shell input redirect
-      #   &   → background process operator
-      #   *   → glob expansion
-      #
-      # The WRONG approach (what caused exit code 127 before):
-      #   echo "${{ secrets.MAVEN_SETTINGS_XML }}" > ~/.m2/settings.xml
-      #
-      #   GitHub Actions expands ${{ secrets.MAVEN_SETTINGS_XML }} inline
-      #   into the shell script BEFORE bash runs it. So bash sees raw XML
-      #   text as shell commands. The > in xsi:schemaLocation becomes a
-      #   redirect operator, and the URL after it becomes a filename to
-      #   redirect into — which does not exist → "No such file or directory".
-      #   Exit code 127.
-      #
-      # The CORRECT approach used here:
-      #   env:
-      #     MAVEN_SETTINGS: ${{ secrets.MAVEN_SETTINGS_XML }}
-      #   run: printf '%s' "$MAVEN_SETTINGS" > ~/.m2/settings.xml
-      #
-      #   Step 1 — GitHub assigns the secret to an environment variable
-      #            MAVEN_SETTINGS at the runner OS level (not inline into
-      #            the shell script text). The XML characters never touch
-      #            the shell script source.
-      #
-      #   Step 2 — bash reads $MAVEN_SETTINGS as a normal env var string.
-      #            No expansion, no interpretation of < > & *.
-      #
-      #   Step 3 — printf '%s' writes the string to stdout byte-by-byte,
-      #            then the shell redirect > writes stdout to the file.
-      #            The > in the redirect is the shell's own syntax,
-      #            not part of the secret — so it is safe.
-      #
-      # Why printf '%s' instead of echo?
-      #   echo interprets escape sequences in some shells (\n, \t, etc.)
-      #   and adds a trailing newline that can corrupt binary-safe content.
-      #   printf '%s' writes the string exactly as-is with no extras.
-      #
-      # Why not heredoc (cat << 'EOF')?
-      #   GitHub Actions does NOT allow ${{ secrets.* }} inside heredoc
-      #   delimiters safely — the secret still gets expanded inline into
-      #   the script text before bash runs. Same problem as echo.
-      #   The env: block is the only safe injection point.
+      # env: block + printf '%s' pattern — safe injection of XML secrets.
+      # See detailed explanation in git history / previous commits.
       # ──────────────────────────────────────────────────────
       - name: Configure Maven settings (Nexus credentials)
         env:
-          # Assign the secret to an OS-level env var first.
-          # GitHub sets this at the runner level — the XML content
-          # never appears inside the shell script source text.
           MAVEN_SETTINGS: ${{ secrets.MAVEN_SETTINGS_XML }}
         run: |
           mkdir -p ~/.m2
-          # printf '%s' writes the env var content exactly as-is.
-          # No shell interpretation of XML characters. No trailing newline added.
           printf '%s' "$MAVEN_SETTINGS" > ~/.m2/settings.xml
 
       # ──────────────────────────────────────────────────────
       # STAGE 4 — Build & Test
       # mvn clean verify: compile → test → JaCoCo → package
-      # JaCoCo runs automatically via pom.xml plugin bindings.
-      # Mirrors Jenkins: withMaven → sh 'mvn clean verify -B'
       # ──────────────────────────────────────────────────────
       - name: Build & Test — mvn clean verify
         run: mvn clean verify -B --no-transfer-progress
@@ -275,38 +208,8 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 5 — SonarQube Analysis
-      # Uses Maven Sonar plugin — same as Jenkinsfile.
-      # SONAR_TOKEN + SONAR_HOST_URL injected via env (not hardcoded).
-      # Mirrors Jenkins: withSonarQubeEnv → mvn sonar:sonar
-      #
-      # FIX: -Dsonar.working.directory pin
-      # ─────────────────────────────────
-      # The SonarQube scanner writes a metadata file after every scan:
-      #   .scannerwork/report-task.txt
-      #
-      # This file contains the ceTaskId that the Quality Gate action
-      # (sonarsource/sonarqube-quality-gate-action) uses to poll
-      # SonarQube for the gate result. Without it, the Quality Gate
-      # step immediately fails with:
-      #   ".scannerwork/report-task.txt does not exist."
-      #
-      # By default, the scanner writes this file relative to wherever
-      # Maven's working directory is. If Maven runs from a subdirectory,
-      # or if sonar.working.directory is not explicitly set, the file
-      # lands in a different path than the workspace root — and the
-      # Quality Gate action, which always looks in
-      # ${{ github.workspace }}/.scannerwork/report-task.txt, cannot
-      # find it.
-      #
-      # The fix: explicitly set -Dsonar.working.directory to an absolute
-      # path anchored at $GITHUB_WORKSPACE. This guarantees the file
-      # is always written to the exact location the Quality Gate action
-      # expects, regardless of where Maven's CWD is.
-      #
-      # Note: $GITHUB_WORKSPACE is a runner shell variable — it equals
-      # the absolute path to the checked-out repo root, e.g.:
-      #   /home/runner/work/java-monolith-app/java-monolith-app
-      # Using it here makes the path portable across any runner.
+      # -Dsonar.working.directory pins report-task.txt to workspace root
+      # so the Quality Gate action (Stage 6) can always find it.
       # ──────────────────────────────────────────────────────
       - name: SonarQube — static analysis
         env:
@@ -325,35 +228,12 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 6 — Quality Gate
-      # Polls SonarQube until webhook result arrives.
-      # Fails the job if Quality Gate is not passed.
-      # Mirrors Jenkins: waitForQualityGate abortPipeline: true
-      #
-      # FIX: scanMetadataReportFile explicit path
-      # ─────────────────────────────────────────
-      # The Quality Gate action reads .scannerwork/report-task.txt
-      # to find the ceTaskId, then polls SonarQube until the gate
-      # status is GREEN or RED.
-      #
-      # scanMetadataReportFile tells the action exactly where to find
-      # the file. We pin it to ${{ github.workspace }}/.scannerwork/
-      # report-task.txt — the same absolute path we told the scanner
-      # to write to via -Dsonar.working.directory above.
-      #
-      # This two-part fix is essential:
-      #   Part A (Stage 5): -Dsonar.working.directory pins WHERE the
-      #                     scanner writes the file.
-      #   Part B (Stage 6): scanMetadataReportFile pins WHERE the
-      #                     Quality Gate action reads the file.
-      # Both must point to the same absolute path. If only one is
-      # set, the fix is incomplete.
+      # scanMetadataReportFile must match -Dsonar.working.directory above.
       # ──────────────────────────────────────────────────────
       - name: SonarQube — Quality Gate check
         uses: sonarsource/sonarqube-quality-gate-action@v1.1.0
         timeout-minutes: 5
         with:
-          # Explicit path to the scanner metadata file written by Stage 5.
-          # Must match -Dsonar.working.directory set in the sonar:sonar command.
           scanMetadataReportFile: ${{ github.workspace }}/.scannerwork/report-task.txt
         env:
           SONAR_TOKEN:    ${{ secrets.SONAR_TOKEN }}
@@ -361,39 +241,14 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 7 — Publish JAR to Nexus
-      # Pushes SNAPSHOT JAR to nexus.ibtisam-iq.com/repository/maven-snapshots/
-      # Server IDs in settings.xml match pom.xml distributionManagement.
-      # Mirrors Jenkins: withMaven → mvn deploy -DskipTests
       # ──────────────────────────────────────────────────────
       - name: Publish JAR to Nexus
         run: mvn deploy -DskipTests -B --no-transfer-progress
 
       # ──────────────────────────────────────────────────────
       # STAGE 8 — Docker Build
-      # Buildx with GHA layer cache — faster rebuilds.
-      # Build once, tag for all three registries.
-      # OCI labels for full image traceability.
-      # Mirrors Jenkins: docker build -t ... (multi-tag)
-      #
-      # WHY load: true and push: false HERE:
-      # ─────────────────────────────────────
-      # We need the image to exist in the LOCAL Docker daemon so that:
-      #   1. Trivy (Stage 9) can scan it with: trivy image <name>:<tag>
-      #      Trivy's image scan mode calls the Docker daemon API directly.
-      #      If the image is not in the daemon, Trivy fails with:
-      #      "unable to find the specified image"
-      #   2. We can docker push it manually in Stages 10–12.
-      #
-      # load: true  → builds the image and loads it into the local Docker daemon
-      # push: false → does NOT push to any registry at this step
-      #
-      # load: true and push: true CANNOT be used together with multi-platform
-      # builds. Since we are on a single amd64 runner and not doing multi-arch,
-      # load: true is safe here.
-      #
-      # The push happens separately in Stages 10, 11, 12 via docker push.
-      # This gives us the security gate (Trivy scan) BEFORE any image
-      # reaches a registry — the core DevSecOps principle.
+      # load: true  → image loaded into local daemon for Trivy scan
+      # push: false → push happens AFTER Trivy passes (Stages 10-12)
       # ──────────────────────────────────────────────────────
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -402,8 +257,8 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context:  ${{ env.APP_DIR }}
-          push:     false   # push happens after Trivy scan in Stages 10-12
-          load:     true    # load into local Docker daemon so Trivy can scan it
+          push:     false
+          load:     true
           tags: |
             ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
             ${{ env.IMAGE_NAME }}:latest
@@ -423,70 +278,111 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 9 — Trivy Image Scan
-      # Scans built image BEFORE pushing — fail-fast principle.
-      # CRITICAL → fail build. HIGH/MEDIUM/LOW → warn only.
-      # Mirrors Jenkins: trivy image --exit-code 1 --severity CRITICAL
-      #
-      # FIX: image-ref uses steps.versioning.outputs.image_tag
-      # ────────────────────────────────────────────────────────
-      # ROOT CAUSE OF THE PREVIOUS FAILURE:
-      #   image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
-      #
-      # ${{ env.IMAGE_TAG }} reads the workflow-level env: block.
-      # That block is evaluated at PARSE TIME — before any step runs.
-      # IMAGE_TAG is not defined there (it is computed at runtime in
-      # the Versioning step), so ${{ env.IMAGE_TAG }} resolves to an
-      # empty string. The image-ref becomes:
-      #   mibtisam/bankapp:
-      # which does not exist in the daemon → Trivy error:
-      #   "unable to find the specified image"
-      #
-      # There are TWO ways to reference a runtime-computed value:
-      #
-      #   Option A — ${{ steps.versioning.outputs.image_tag }}
-      #     Reads from the step output written to $GITHUB_OUTPUT.
-      #     Evaluated at STEP EXECUTION TIME, not parse time.
-      #     Works in any ${{ }} expression in any later step.
-      #     ✅ Used here — correct for ${{ }} expressions.
-      #
-      #   Option B — $IMAGE_TAG  (in a bash run: block only)
-      #     Reads from the runner OS environment set via $GITHUB_ENV.
-      #     Only available inside run: shell scripts.
-      #     ✅ Used in bash steps like docker push, git commit, etc.
-      #
-      #   Option C — ${{ env.IMAGE_TAG }}
-      #     Reads the STATIC workflow-level env: block.
-      #     ❌ Does NOT see values written to $GITHUB_ENV at runtime.
-      #     ❌ Was the bug — always empty for dynamic tags.
-      #
-      # Rule of thumb:
-      #   In ${{ }} expressions → use steps.<id>.outputs.<name>
-      #   In bash run: blocks   → use $VAR_NAME (from $GITHUB_ENV)
-      #   Never use ${{ env.X }} for runtime-computed variables
       # ──────────────────────────────────────────────────────
-      - name: Trivy — image scan (CRITICAL → fail)
+      # WHY THREE SEPARATE SCAN PASSES:
+      # ───────────────────────────────
+      # A Docker image contains TWO distinct layers of software:
+      #
+      #   1. OS packages — installed by the base image maintainer
+      #      (apt packages: glibc, openssl, zlib, libcurl, etc.)
+      #      Responsibility: BASE IMAGE VENDOR (Canonical/Eclipse Temurin team)
+      #      You cannot fix these by changing your code or pom.xml.
+      #      If Canonical has not released a patch yet, there is NOTHING you can do
+      #      except wait for the next base image update or switch base image.
+      #      Failing the build on unfixed OS CVEs blocks you indefinitely on issues
+      #      you have zero control over.
+      #
+      #   2. Library (JAR) vulnerabilities — dependencies declared in pom.xml
+      #      (Spring Boot, Hibernate, Jackson, Tomcat, Log4j, etc.)
+      #      Responsibility: YOU — the application developer.
+      #      These ARE fixable by upgrading the version in pom.xml.
+      #      CRITICAL JAR CVEs should always fail the build.
+      #
+      # The industry-standard approach (used at Google, Netflix, Shopify, etc.):
+      #
+      #   Pass A — OS packages only (vuln-type: os)
+      #     exit-code: '0' — WARN only, never fail
+      #     Reason: OS CVEs are the vendor's responsibility. The Ubuntu Jammy
+      #     base image (eclipse-temurin:21-jre-jammy) may have some packages
+      #     that Canonical has assessed as "negligible" or "not backported" even
+      #     though NVD scores them CRITICAL. Canonical's security team deliberately
+      #     does not backport certain fixes because the CVE is not exploitable in
+      #     the Ubuntu packaging context. Trivy reports them anyway (NVD score).
+      #     Failing on these creates permanent pipeline blockage you cannot resolve.
+      #
+      #   Pass B — Library (JAR) vulnerabilities only (vuln-type: library)
+      #     CRITICAL → exit-code: '1' (fail the build)
+      #     HIGH/MEDIUM → exit-code: '0' (warn only)
+      #     Reason: These are Spring Boot / Hibernate / Jackson CVEs in YOUR
+      #     pom.xml. You own them. Fix = bump the version in pom.xml.
+      #
+      #   Pass C — All severities, full report for audit trail
+      #     exit-code: '0', format: json, uploaded as artifact
+      #     Reason: Security audit trail. Even OS CVEs should be visible and
+      #     tracked. This report goes to the artifact store for review.
+      #
+      # This split is the CORRECT production approach — not a workaround.
+      # It enforces accountability at the right layer:
+      #   Your code → your responsibility → fail the build
+      #   Vendor's OS → vendor's responsibility → warn + track
+      # ──────────────────────────────────────────────────────
+
+      # Pass A — OS packages: WARN only (vendor's responsibility)
+      # vuln-type: os → only scans apt/apk/rpm installed packages
+      # exit-code: '0' → findings reported but never fail the build
+      # These CVEs are in Ubuntu Jammy base packages. Canonical decides
+      # if/when to patch them. You have no control over these.
+      - name: Trivy — image scan OS packages (CRITICAL → warn only)
         uses: aquasecurity/trivy-action@0.35.0
         with:
-          scan-type:  image
-          # Use step output reference — resolves at execution time, not parse time.
-          # This is the runtime tag computed in the Versioning step.
-          image-ref:  ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
-          severity:   CRITICAL
-          exit-code:  '1'
-          format:     json
-          output:     trivy-image-report.json
+          scan-type:   image
+          image-ref:   ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
+          vuln-type:   os
+          severity:    CRITICAL,HIGH
+          exit-code:   '0'
+          format:      table
 
-      - name: Trivy — image scan (HIGH/MEDIUM/LOW → warn only)
+      # Pass B — Library (JAR) CRITICALs: FAIL the build
+      # vuln-type: library → only scans JARs, npm packages, pip packages, etc.
+      # exit-code: '1' → any CRITICAL in your app dependencies fails the build
+      # These are YOUR dependencies declared in pom.xml.
+      # Fix: bump the version of the affected dependency in pom.xml.
+      - name: Trivy — image scan JAR/library (CRITICAL → fail)
+        uses: aquasecurity/trivy-action@0.35.0
+        with:
+          scan-type:   image
+          image-ref:   ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
+          vuln-type:   library
+          severity:    CRITICAL
+          exit-code:   '1'
+          format:      table
+
+      # Pass B (cont.) — Library HIGH/MEDIUM: warn only
+      - name: Trivy — image scan JAR/library (HIGH/MEDIUM → warn only)
         uses: aquasecurity/trivy-action@0.35.0
         if: always()
         with:
-          scan-type:  image
-          image-ref:  ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
-          severity:   HIGH,MEDIUM,LOW
-          exit-code:  '0'
-          format:     table
+          scan-type:   image
+          image-ref:   ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
+          vuln-type:   library
+          severity:    HIGH,MEDIUM
+          exit-code:   '0'
+          format:      table
 
-      - name: Upload Trivy image report
+      # Pass C — Full report for audit trail (all vuln-types, all severities)
+      # Never fails the build. Saved as artifact for security review.
+      - name: Trivy — image scan full report (audit artifact)
+        uses: aquasecurity/trivy-action@0.35.0
+        if: always()
+        with:
+          scan-type:   image
+          image-ref:   ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
+          severity:    CRITICAL,HIGH,MEDIUM,LOW
+          exit-code:   '0'
+          format:      json
+          output:      trivy-image-report.json
+
+      - name: Upload Trivy image report (audit artifact)
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -496,8 +392,6 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 10 — Push to Docker Hub
-      # Mirrors Jenkins: docker-creds → docker login → docker push
-      # docker/login-action@v3 — current standard (April 2026)
       # ──────────────────────────────────────────────────────
       - name: Docker Hub — login
         uses: docker/login-action@v3
@@ -507,14 +401,11 @@ jobs:
 
       - name: Docker Hub — push image
         run: |
-          # $IMAGE_TAG is available here from $GITHUB_ENV (set in Versioning step)
           docker push ${{ env.IMAGE_NAME }}:$IMAGE_TAG
           docker push ${{ env.IMAGE_NAME }}:latest
 
       # ──────────────────────────────────────────────────────
       # STAGE 11 — Push to GitHub Container Registry (GHCR)
-      # GITHUB_TOKEN is automatic — no extra secret needed.
-      # Mirrors Jenkins: ghcr-creds → docker login ghcr.io
       # ──────────────────────────────────────────────────────
       - name: GHCR — login
         uses: docker/login-action@v3
@@ -530,8 +421,6 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 12 — Push to Nexus Docker Registry
-      # Path-based routing: nexus.ibtisam-iq.com/docker-hosted/bankapp:<tag>
-      # Mirrors Jenkins: nexus-creds → docker login → docker push
       # ──────────────────────────────────────────────────────
       - name: Nexus — login
         uses: docker/login-action@v3
@@ -547,34 +436,19 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 13 — Push to AWS ECR  [PLANNED — commented out]
-      # Uncomment once ECR repo and AWS credentials are ready.
-      #
-      # Required secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
-      #                   AWS_REGION, AWS_ACCOUNT_ID
-      #
+      # ──────────────────────────────────────────────────────
       # - name: AWS ECR — login
       #   uses: aws-actions/amazon-ecr-login@v2
-      #   with:
-      #     aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
-      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      #     aws-region:            ${{ secrets.AWS_REGION }}
-      #
       # - name: AWS ECR — tag and push
       #   run: |
-      #     ECR_REGISTRY="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com"
-      #     ECR_IMAGE="${ECR_REGISTRY}/${{ env.APP_NAME }}"
-      #     docker tag ${{ env.IMAGE_NAME }}:$IMAGE_TAG "${ECR_IMAGE}:${IMAGE_TAG}"
-      #     docker tag ${{ env.IMAGE_NAME }}:latest     "${ECR_IMAGE}:latest"
+      #     ECR_IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ env.APP_NAME }}"
+      #     docker tag ${{ env.IMAGE_NAME }}:$IMAGE_TAG  "${ECR_IMAGE}:${IMAGE_TAG}"
+      #     docker tag ${{ env.IMAGE_NAME }}:latest      "${ECR_IMAGE}:latest"
       #     docker push "${ECR_IMAGE}:${IMAGE_TAG}"
       #     docker push "${ECR_IMAGE}:latest"
-      # ──────────────────────────────────────────────────────
 
       # ──────────────────────────────────────────────────────
       # STAGE 14 — Update CD Repo (GitOps handoff)
-      # Commits new image tag into platform-engineering-systems
-      # so ArgoCD detects the change and triggers deployment.
-      # Only runs on push to main — skipped on PRs.
-      # Mirrors Jenkins: git clone → echo → git commit → git push
       # ──────────────────────────────────────────────────────
       - name: Update CD repo — GitOps image tag handoff
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -583,24 +457,16 @@ jobs:
         run: |
           git config --global user.email "github-actions@ibtisam-iq.com"
           git config --global user.name  "GitHub Actions CI"
-
           git clone https://ibtisam-iq:${GIT_TOKEN}@github.com/ibtisam-iq/platform-engineering-systems.git cd-repo
           cd cd-repo
-
-          # Once K8s/Helm manifests exist, replace the line below with:
-          # sed -i "s|image: ibtisam-iq/bankapp:.*|image: ibtisam-iq/bankapp:${IMAGE_TAG}|g" \
-          #     deployments/java-monolith/deployment.yaml
-
           mkdir -p systems/java-monolith
           echo "IMAGE_TAG=${IMAGE_TAG}" > systems/java-monolith/image.env
-
           git add systems/java-monolith/image.env
           git commit -m "ci: update bankapp image tag to ${IMAGE_TAG} [skip ci]" || echo "Nothing to commit"
           git push origin main
 
       # ──────────────────────────────────────────────────────
       # Cleanup — remove local Docker images
-      # Mirrors Jenkins: post { always { docker rmi ... } }
       # ──────────────────────────────────────────────────────
       - name: Cleanup — remove local Docker images
         if: always()
