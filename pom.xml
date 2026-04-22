@@ -6,6 +6,20 @@
 	<modelVersion>4.0.0</modelVersion>
 
     <!-- Parent: Spring Boot 3.4.4 — latest stable (April 2026) -->
+    <!--
+        HOW THE BOM WORKS:
+        This <parent> is a Bill of Materials (BOM). It is a hidden dependency
+        spreadsheet that silently injects versions for ALL transitive libraries
+        (Tomcat, Spring Security, Thymeleaf, Hibernate, etc.) at build time.
+        You never see those versions in this file — the BOM supplies them.
+
+        HOW TO OVERRIDE A BOM VERSION:
+        Maven checks <properties> BEFORE the BOM. If you define a property key
+        that the BOM uses internally (e.g. tomcat.version), your value wins.
+        This is the officially documented Spring Boot mechanism for patching
+        individual transitive dependencies without upgrading the entire parent.
+        Reference: https://docs.spring.io/spring-boot/docs/current/reference/html/dependency-versions.html
+    -->
 	<parent>
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
@@ -58,6 +72,75 @@
 		<sonar.jacoco.reportPath>${project.basedir}/../target/jacoco.exec</sonar.jacoco.reportPath>
 		-->
 		<sonar.language>java</sonar.language>
+
+        <!--
+            ============================================================
+            SECURITY PATCH: BOM VERSION OVERRIDES — April 2026
+            ============================================================
+            WHY THESE EXIST:
+            Spring Boot 3.4.4's BOM pins versions of Tomcat, Spring Security,
+            and Thymeleaf that contain CRITICAL CVEs (confirmed by Trivy image
+            scan on 2026-04-22). All 7 findings have Status: "fixed", meaning
+            patched versions are already released and available.
+
+            These three properties override the BOM's pinned versions.
+            Maven resolves <properties> before the BOM, so your value wins.
+            No <dependency> block changes are needed — the override is purely
+            version-level and the BOM wires it through all transitive pulls.
+
+            WHAT NOT TO DO:
+            - Do NOT set exit-code: 0 in Trivy (hides the problem, ships
+              vulnerable images silently — violates DevSecOps principles).
+            - Do NOT use .trivyignore for CVEs that have a fix available
+              (acceptable only when no fix exists or fix breaks compliance).
+
+            TO VERIFY THE FIX:
+            After build, run: mvn dependency:tree | grep -E "tomcat|spring-security|thymeleaf"
+            You should see the patched versions listed below.
+            ============================================================
+        -->
+
+        <!--
+            TOMCAT OVERRIDE
+            BOM-pinned : 10.1.39
+            Patched to : 10.1.53
+            CVE fixed  : CVE-2026-29145 (CRITICAL)
+            Issue      : Authentication bypass due to CLIENT_CERT soft-fail
+                         misconfiguration in Apache Tomcat embed core.
+            Ref        : https://avd.aquasec.com/nvd/cve-2026-29145
+        -->
+        <tomcat.version>10.1.53</tomcat.version>
+
+        <!--
+            SPRING SECURITY OVERRIDE
+            BOM-pinned : 6.4.4
+            Patched to : 6.4.6
+            CVEs fixed : CVE-2025-41232 (CRITICAL) — method security bypass
+                           on private methods via annotation processing flaw.
+                         CVE-2026-22732 (CRITICAL) — security policy bypass
+                           and information disclosure in spring-security-web.
+            Ref        : https://avd.aquasec.com/nvd/cve-2025-41232
+                         https://avd.aquasec.com/nvd/cve-2026-22732
+            Scope      : Patches both spring-security-core and
+                         spring-security-web (same artifact group).
+        -->
+        <spring-security.version>6.4.6</spring-security.version>
+
+        <!--
+            THYMELEAF OVERRIDE
+            BOM-pinned : 3.1.3.RELEASE
+            Patched to : 3.1.4.RELEASE
+            CVEs fixed : CVE-2026-40477 (CRITICAL) — Server-Side Template
+                           Injection via security bypass in expression execution.
+                         CVE-2026-40478 (CRITICAL) — SSTI via expression
+                           execution bypass (variant of the above).
+            Ref        : https://avd.aquasec.com/nvd/cve-2026-40477
+                         https://avd.aquasec.com/nvd/cve-2026-40478
+            Scope      : Patches both thymeleaf and thymeleaf-spring6
+                         (same artifact group, same version property key).
+        -->
+        <thymeleaf.version>3.1.4.RELEASE</thymeleaf.version>
+
 	</properties>
 
 	<dependencies>
