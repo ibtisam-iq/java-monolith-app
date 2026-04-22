@@ -110,7 +110,7 @@ jobs:
       # aquasecurity/trivy-action@0.30.0 — latest stable (April 2026)
       # ──────────────────────────────────────────────────────
       - name: Trivy — filesystem scan (CRITICAL → fail)
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type:  fs
           scan-ref:   ${{ env.APP_DIR }}
@@ -121,7 +121,7 @@ jobs:
           output:     trivy-fs-report.json
 
       - name: Trivy — filesystem scan (HIGH/MEDIUM → warn only)
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.35.0
         if: always()
         with:
           scan-type:  fs
@@ -279,7 +279,7 @@ jobs:
       # Mirrors Jenkins: trivy image --exit-code 1 --severity CRITICAL
       # ──────────────────────────────────────────────────────
       - name: Trivy — image scan (CRITICAL → fail)
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type:  image
           image-ref:  ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
@@ -289,7 +289,7 @@ jobs:
           output:     trivy-image-report.json
 
       - name: Trivy — image scan (HIGH/MEDIUM/LOW → warn only)
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.35.0
         if: always()
         with:
           scan-type:  image
