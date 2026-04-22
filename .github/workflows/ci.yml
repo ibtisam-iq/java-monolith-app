@@ -164,13 +164,70 @@ jobs:
           distribution: temurin
           cache: maven
 
-      # Write settings.xml from secret
+      # ──────────────────────────────────────────────────────
+      # Configure Maven settings (Nexus credentials)
       # Mirrors Jenkins: "maven-settings" Config File Provider
-      # Contains Nexus server credentials matching pom.xml distributionManagement IDs
+      #
+      # WHY THIS APPROACH (env: block + printf '%s'):
+      # ─────────────────────────────────────────────
+      # The MAVEN_SETTINGS_XML secret contains a full XML file.
+      # XML has characters that bash treats as special operators:
+      #
+      #   >   → shell redirect operator  (breaks: echo "$SECRET" > file)
+      #   <   → shell input redirect
+      #   &   → background process operator
+      #   *   → glob expansion
+      #
+      # The WRONG approach (what was here before):
+      #   echo "${{ secrets.MAVEN_SETTINGS_XML }}" > ~/.m2/settings.xml
+      #
+      #   GitHub Actions expands ${{ secrets.MAVEN_SETTINGS_XML }} inline
+      #   into the shell script BEFORE bash runs it. So bash sees raw XML
+      #   text as shell commands. The > in xsi:schemaLocation becomes a
+      #   redirect operator, and the URL after it becomes a filename to
+      #   redirect into — which does not exist → "No such file or directory".
+      #   Exit code 127.
+      #
+      # The CORRECT approach used here:
+      #   env:
+      #     MAVEN_SETTINGS: ${{ secrets.MAVEN_SETTINGS_XML }}
+      #   run: printf '%s' "$MAVEN_SETTINGS" > ~/.m2/settings.xml
+      #
+      #   Step 1 — GitHub assigns the secret to an environment variable
+      #            MAVEN_SETTINGS at the runner OS level (not inline into
+      #            the shell script text). The XML characters never touch
+      #            the shell script source.
+      #
+      #   Step 2 — bash reads $MAVEN_SETTINGS as a normal env var string.
+      #            No expansion, no interpretation of < > & *.
+      #
+      #   Step 3 — printf '%s' writes the string to stdout byte-by-byte,
+      #            then the shell redirect > writes stdout to the file.
+      #            The > in the redirect is the shell's own syntax,
+      #            not part of the secret — so it is safe.
+      #
+      # Why printf '%s' instead of echo?
+      #   echo interprets escape sequences in some shells (\n, \t, etc.)
+      #   and adds a trailing newline that can corrupt binary-safe content.
+      #   printf '%s' writes the string exactly as-is with no extras.
+      #
+      # Why not heredoc (cat << 'EOF')?
+      #   GitHub Actions does NOT allow ${{ secrets.* }} inside heredoc
+      #   delimiters safely — the secret still gets expanded inline into
+      #   the script text before bash runs. Same problem as echo.
+      #   The env: block is the only safe injection point.
+      # ──────────────────────────────────────────────────────
       - name: Configure Maven settings (Nexus credentials)
+        env:
+          # Assign the secret to an OS-level env var first.
+          # GitHub sets this at the runner level — the XML content
+          # never appears inside the shell script source text.
+          MAVEN_SETTINGS: ${{ secrets.MAVEN_SETTINGS_XML }}
         run: |
           mkdir -p ~/.m2
-          echo "${{ secrets.MAVEN_SETTINGS_XML }}" > ~/.m2/settings.xml
+          # printf '%s' writes the env var content exactly as-is.
+          # No shell interpretation of XML characters. No trailing newline added.
+          printf '%s' "$MAVEN_SETTINGS" > ~/.m2/settings.xml
 
       # ──────────────────────────────────────────────────────
       # STAGE 4 — Build & Test
