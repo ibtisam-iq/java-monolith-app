@@ -55,17 +55,17 @@ concurrency:
 
 env:
   # ── App metadata (must match pom.xml)
-  APP_NAME:       bankapp
+  APP_NAME:       java-monolith
   APP_VERSION:    0.0.1-SNAPSHOT
   GROUP_ID:       com.ibtisamiq
 
   # ── Docker Hub
   DOCKER_USER:    mibtisam
-  IMAGE_NAME:     mibtisam/bankapp
+  IMAGE_NAME:     mibtisam/java-monolith
 
   # ── GHCR
   GHCR_USER:      ibtisam-iq
-  GHCR_IMAGE:     ghcr.io/ibtisam-iq/bankapp
+  GHCR_IMAGE:     ghcr.io/ibtisam-iq/java-monolith
 
   # ── Nexus Docker (path-based routing — no dedicated port needed)
   NEXUS_DOCKER:      nexus.ibtisam-iq.com
@@ -228,8 +228,8 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
           mvn sonar:sonar \
-            -Dsonar.projectKey=IbtisamIQbankapp \
-            -Dsonar.projectName=IbtisamIQbankapp \
+            -Dsonar.projectKey=IbtisamIQjava-monolith \
+            -Dsonar.projectName=IbtisamIQjava-monolith \
             -Dsonar.host.url="${SONAR_HOST_URL}" \
             -Dsonar.token="${SONAR_TOKEN}" \
             -Dsonar.java.binaries=target/classes \
@@ -473,7 +473,7 @@ jobs:
           mkdir -p systems/java-monolith
           echo "IMAGE_TAG=${IMAGE_TAG}" > systems/java-monolith/image.env
           git add systems/java-monolith/image.env
-          git commit -m "ci: update bankapp image tag to ${IMAGE_TAG} [skip ci]" || echo "Nothing to commit"
+          git commit -m "ci: update java-monolith image tag to ${IMAGE_TAG} [skip ci]" || echo "Nothing to commit"
           git push origin main
 
       # ──────────────────────────────────────────────────────
