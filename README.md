@@ -207,6 +207,16 @@ Both pipelines cover the same 14 DevSecOps stages: Trivy FS scan → Build & Tes
 
 👉 **Pipelines repository:** [DevSecOps Pipelines](https://github.com/ibtisam-iq/devsecops-pipelines/tree/main/pipelines/java-monolith)
 
+#### docker Images
+
+```text
+ibtisam@dev-machine:~ $ docker images
+IMAGE                                                     ID             DISK USAGE   CONTENT SIZE   EXTRA
+ghcr.io/ibtisam-iq/java-monolith:latest                   88a727976b14        621MB          186MB        
+mibtisam/java-monolith:latest                             88a727976b14        621MB          186MB        
+nexus.ibtisam-iq.com/docker-hosted/java-monolith:latest   88a727976b14        621MB          186MB
+```
+
 ---
 
 ### Step 5 — Platform Engineering (Deployment & Operations)
