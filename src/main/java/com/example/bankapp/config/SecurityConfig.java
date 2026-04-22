@@ -10,7 +10,6 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 
 @Configuration
 @EnableWebSecurity
@@ -41,7 +40,12 @@ public class SecurityConfig {
                 .logout(logout -> logout
                         .invalidateHttpSession(true)
                         .clearAuthentication(true)
-                        .logoutRequestMatcher(new AntPathRequestMatcher("/logout"))
+                        // FIX: replaced deprecated AntPathRequestMatcher (marked for removal
+                        // in Spring Security 6.x) with the modern logoutUrl() API.
+                        // logoutUrl() is the direct replacement — it handles the matcher
+                        // internally without requiring manual instantiation.
+                        // Resolves SonarQube rule java:S5738.
+                        .logoutUrl("/logout")
                         .logoutSuccessUrl("/login?logout")
                         .permitAll()
                 )
@@ -55,6 +59,5 @@ public class SecurityConfig {
     @Autowired
     public void configureGlobal(AuthenticationManagerBuilder auth) throws Exception {
         auth.userDetailsService(accountService).passwordEncoder(passwordEncoder());
-
     }
 }
