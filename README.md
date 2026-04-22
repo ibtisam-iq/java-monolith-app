@@ -223,6 +223,9 @@ With the application containerized and the registry strategy confirmed, I moved 
 
 The build fails hard on three conditions: Trivy finds CRITICAL CVEs in JAR dependencies, SonarQube Quality Gate does not pass, or any unit test fails.
 
+> **Jenkins Pipeline — Build #12 — All 14 stages passed**
+> ![Jenkins pipeline all 14 stages passed](docs/assets/jenkins-pipeline-success.png)
+
 #### Jenkins
 
 Built as a fully declarative pipeline in `Jenkinsfile` — no shared libraries, no scripted blocks. The file itself became a learning artifact: every stage has inline rationale, and the design decisions that were not obvious — credential scoping, publisher placement, agent behaviour — are documented in [`docs/understand-jenkinsfile.md`](docs/understand-jenkinsfile.md).
