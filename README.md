@@ -189,36 +189,36 @@ docker compose down -v
 
 ### Step 4 — DevSecOps Pipelines (CI/CD)
 
-With the application containerized and validated, I designed and implemented a 14-stage DevSecOps pipeline and delivered it in two forms — a `Jenkinsfile` for self-hosted Jenkins infrastructure and a `ci.yml` for GitHub Actions — both living in this repository.
+With the application containerized and the registry strategy confirmed, I moved to automating the full build-test-scan-publish cycle. I ran the Jenkins pipeline against my own self-hosted CI/CD stack — Jenkins, SonarQube, and Nexus — provisioned and documented separately in [silver-stack](https://nectar.ibtisam-iq.com/operations/cicd-stack/self-hosted-jenkins-sonarqube-nexus/). The same 14 stages were then mirrored in GitHub Actions, giving both a self-hosted and a zero-infrastructure path through the identical pipeline.
 
-**Pipeline stages (identical in both):**
+**Pipeline stages (both implementations):**
 
 | # | Stage | What it does |
 |---|---|---|
 | 1 | Checkout | Clone source at the correct ref |
-| 2 | Trivy FS Scan | Scan source tree for secrets, misconfigs, and dependency CVEs — before wasting build time |
-| 3 | Versioning | Compute a unique image tag: `<pom-version>-<short-sha>-<build-number>` |
+| 2 | Trivy FS Scan | Scan source tree for secrets, misconfigs, and dependency CVEs before build |
+| 3 | Versioning | Compute image tag: `<pom-version>-<short-sha>-<build-number>` |
 | 4 | Build & Test | `mvn clean verify` — compile, unit test, JaCoCo coverage in one pass |
 | 5 | SonarQube Analysis | Static analysis with blame info and JaCoCo XML coverage upload |
 | 6 | Quality Gate | Block pipeline until SonarQube webhook fires back pass/fail |
 | 7 | Publish JAR to Nexus | Deploy SNAPSHOT JAR to `maven-snapshots` repository |
 | 8 | Docker Build | Multi-stage image built once, tagged for all three registries |
-| 9 | Trivy Image Scan | Three passes: OS packages (warn), JAR CRITICALs (fail build), full audit artifact |
+| 9 | Trivy Image Scan | Three passes: OS packages (warn), JAR CRITICALs (fail), full audit artifact |
 | 10 | Push to Docker Hub | Push versioned tag + `latest` to `mibtisam/java-monolith` |
 | 11 | Push to GHCR | Push to `ghcr.io/ibtisam-iq/java-monolith` |
-| 12 | Push to Nexus Registry | Push to `nexus.ibtisam-iq.com/docker-hosted/java-monolith` (path-based routing) |
-| 13 | Push to AWS ECR | Planned — commented out, ready to enable once ECR repo is provisioned |
+| 12 | Push to Nexus Registry | Push to `nexus.ibtisam-iq.com/docker-hosted/java-monolith` |
+| 13 | Push to AWS ECR | Planned — ready to enable once ECR repo is provisioned |
 | 14 | Update CD Repo | Commit new image tag to `platform-engineering-systems` — GitOps handoff to ArgoCD |
 
 The build fails hard on three conditions: Trivy finds CRITICAL CVEs in JAR dependencies, SonarQube Quality Gate does not pass, or any unit test fails.
 
 #### Jenkins
 
-I wrote `Jenkinsfile` using declarative pipeline syntax with `agent any` and a 45-minute timeout. Credentials — SonarQube token, Docker Hub, GHCR, Nexus, GitHub — are all injected via `withCredentials` and `withSonarQubeEnv`; nothing is hardcoded. Maven settings (with Nexus server credentials) are injected through the Config File Provider plugin via `withMaven(globalMavenSettingsConfig: 'maven-settings')`. JUnit results and JaCoCo coverage are published in the `post { always }` block using the `junit` and `recordCoverage` publisher steps.
+The pipeline is defined in `Jenkinsfile` at the repo root using Jenkins declarative syntax, designed to run on any Jenkins instance without shared libraries or scripted blocks — just point a job at this repo. The non-obvious design decisions, stage-level rationale, and every problem I hit while building it are documented in [`docs/understand-jenkinsfile.md`](docs/understand-jenkinsfile.md).
 
 #### GitHub Actions
 
-I wrote `.github/workflows/ci.yml` as a single `ci` job running on `ubuntu-24.04`. The workflow triggers on push and pull request to `main`, with `paths-ignore` set so changes to `README.md`, `docs/`, `Jenkinsfile`, and `compose.yml` do not trigger a build. In-progress runs for the same branch are cancelled automatically via `concurrency`. Maven settings (Nexus credentials) are injected from a `MAVEN_SETTINGS_XML` secret written to `~/.m2/settings.xml` at runtime. The image tag is computed in a `versioning` step and forwarded to later steps via both `$GITHUB_OUTPUT` (for `${{ steps.versioning.outputs.image_tag }}` expressions) and `$GITHUB_ENV` (for shell `run:` blocks). The CD repo update in Stage 14 runs only on push to `main` — not on pull request builds.
+The same pipeline runs in `.github/workflows/ci.yml` on GitHub-hosted runners — no server provisioning needed. It triggers on push and pull request to `main`, with path filters so documentation-only changes do not trigger a build. The Trivy scan strategy and why the filesystem and image scan gates are configured differently are explained in [`docs/trivy-troubleshooting.md`](docs/trivy-troubleshooting.md). SonarQube Quality Gate wiring specifics are in [`docs/sonarqube-troubleshooting.md`](docs/sonarqube-troubleshooting.md).
 
 #### Built Docker Images
 
