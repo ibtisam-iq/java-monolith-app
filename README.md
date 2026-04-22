@@ -9,7 +9,7 @@ This is a Java Spring Boot-based monolithic banking web application serving as t
 
 > I did not write this application from scratch. As a DevOps Engineer, my focus is on everything that happens **around the code** — building, securing, packaging, and operating it in production-like environments.
 
-> The files I added to this repository are: `Dockerfile`, `compose.yml`, `.dockerignore`, and `.gitignore`. Everything else under `src/` belongs to the original developer.
+> The files I added to this repository are: `Dockerfile`, `compose.yml`, `.dockerignore`, `.gitignore`, and `.github/workflows/ci.yml`. Everything else under `src/` belongs to the original developer.
 
 ---
 
@@ -17,6 +17,9 @@ This is a Java Spring Boot-based monolithic banking web application serving as t
 
 ```
 java-monolith-app/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                      # GitHub Actions DevSecOps CI pipeline (14 stages)
 ├── src/
 │   └── main/
 │       ├── java/com/example/bankapp/   # Controllers, Services, Repositories
@@ -188,7 +191,17 @@ docker compose down -v
 
 With the application validated both natively and in containers, I built automated pipelines to transform this code into a secure, deployable artifact.
 
-Pipelines include: Maven build → SonarQube analysis → Trivy vulnerability scan → Docker image build → Nexus artifact management → Jenkins & GitHub Actions automation.
+#### Jenkins
+
+The Jenkins pipeline is defined in the [DevSecOps Pipelines](https://github.com/ibtisam-iq/devsecops-pipelines/tree/main/pipelines/java-monolith) repository, where this app is linked as a Git submodule. Jenkins checks out that entire repo (with submodules) and runs `pipelines/java-monolith/jenkins/Jenkinsfile`.
+
+#### GitHub Actions
+
+The GitHub Actions workflow lives **here**, in this repository, at `.github/workflows/ci.yml`. This is an intentional placement decision: the `ci.yml` always belongs to the application source repo — it triggers on commits to this repo and needs no submodule setup because the code is already at the root.
+
+A reference copy is maintained in the pipelines repo at `pipelines/java-monolith/github-actions/ci.yml` for documentation and comparison purposes.
+
+Both pipelines cover the same 14 DevSecOps stages: Trivy FS scan → Build & Test → SonarQube → Quality Gate → Nexus JAR publish → Docker build → Trivy image scan → Push to Docker Hub / GHCR / Nexus → Update CD repo.
 
 👉 **Pipelines repository:** [DevSecOps Pipelines](https://github.com/ibtisam-iq/devsecops-pipelines/tree/main/pipelines/java-monolith)
 
