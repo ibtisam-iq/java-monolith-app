@@ -30,7 +30,7 @@ java-monolith-app/
 ├── .dockerignore                       # Excludes target/, .env, IDE files from build context
 ├── .gitignore                          # Excludes .env, target/, IDE files from version control
 ├── .env.example                        # Environment variable template
-├── pom.xml                             # Maven build config (Spring Boot 3.4.4, Java 21)
+├── pom.xml                             # Maven build config (Spring Boot 3.4.5, Java 21)
 └── mvnw                                # Maven wrapper
 ```
 
@@ -43,7 +43,7 @@ Three-tier architecture: Presentation (Controllers/Thymeleaf UI) → Business (S
 | Layer | Technology |
 |---|---|
 | Language | Java 21 |
-| Framework | Spring Boot 3.4.4 |
+| Framework | Spring Boot 3.4.5 |
 | Persistence | Spring Data JPA + Hibernate |
 | Database | MySQL (production) / H2 (local dev) |
 | Web Server | Embedded Tomcat (port 8000) |
@@ -58,7 +58,7 @@ Three-tier architecture: Presentation (Controllers/Thymeleaf UI) → Business (S
 
 ### Step 0 — Codebase Modernization (`pom.xml`)
 
-Before doing any DevOps work, I audited and modernized `pom.xml` — upgrading to Spring Boot 3.4.4, Java 21 (LTS), fixing an invalid `groupId`, replacing the deprecated MySQL connector, adding H2 for local dev flexibility, and adding `spring-boot-starter-actuator` for Docker and Kubernetes health probes.
+Before doing any DevOps work, I audited and modernized `pom.xml` — upgrading to Spring Boot 3.4.5, Java 21 (LTS), fixing an invalid `groupId`, replacing the deprecated MySQL connector, adding H2 for local dev flexibility, and adding `spring-boot-starter-actuator` for Docker and Kubernetes health probes.
 
 > I used AI-assisted analysis (Perplexity Pro) for this step. Full change log with rationale: [`docs/pom-modernization.md`](docs/pom-modernization.md)
 
@@ -148,7 +148,7 @@ With the application validated on bare metal, I wrote the `Dockerfile` and `comp
 
 **Key decisions I made and documented:**
 
-- Multi-stage build to keep the runtime image lean (~190MB vs ~600MB)
+- Multi-stage build to keep the runtime image lean (~186MB vs ~500MB+)
 - Non-root user for CIS/Trivy compliance
 - JVM container-awareness flags (`-XX:+UseContainerSupport`) to prevent OOM kills in Kubernetes
 - Healthcheck timing tuned to Spring Boot's actual cold-start duration
