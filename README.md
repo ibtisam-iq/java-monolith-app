@@ -15,7 +15,7 @@
 
 ## Overview
 
-This is a Java Spring Boot-based monolithic banking web application that I used as the base for practising and implementing real-world DevOps engineering — from codebase modernization and containerization to full CI/CD pipelines and production-grade deployments.
+This is a Java Spring Boot-based monolithic banking web application that I used as the base for practising and implementing real-world DevSecOps engineering — from codebase modernization and containerization to full CI/CD pipelines and production-grade deployments.
 
 > I did not write this application from scratch. As a DevOps Engineer, my focus is on everything that happens **around the code** — building, securing, packaging, and operating it in production-like environments.
 
