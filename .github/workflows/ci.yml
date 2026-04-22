@@ -144,13 +144,32 @@ jobs:
       # Format: <pom-version>-<short-sha>-<run-number>
       # e.g.   0.0.1-SNAPSHOT-ab3f12c-42
       # Mirrors Jenkins: APP_VERSION-shortSHA-BUILD_NUMBER
+      #
+      # TWO outputs written deliberately:
+      #   $GITHUB_OUTPUT  → steps.versioning.outputs.image_tag
+      #                     Used by steps that reference ${{ steps.versioning.outputs.image_tag }}
+      #                     This is the ONLY safe way to pass a runtime-computed value
+      #                     to later steps inside the same job via ${{ }} syntax.
+      #
+      #   $GITHUB_ENV     → IMAGE_TAG environment variable
+      #                     Used by shell `run:` blocks that reference $IMAGE_TAG directly.
+      #                     This is the runtime bash env — available from the NEXT step onward.
+      #
+      # IMPORTANT: ${{ env.IMAGE_TAG }} does NOT work for runtime-computed values.
+      #   The env: block at the top of the workflow is evaluated at workflow parse time,
+      #   BEFORE any step runs. It cannot contain values computed during a step.
+      #   So ${{ env.IMAGE_TAG }} would always be empty for dynamic tags.
+      #   Use ${{ steps.versioning.outputs.image_tag }} in ${{ }} expressions,
+      #   and $IMAGE_TAG (or ${IMAGE_TAG}) in bash run: blocks instead.
       # ──────────────────────────────────────────────────────
       - name: Versioning — compute image tag
         id: versioning
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           IMAGE_TAG="${APP_VERSION}-${SHORT_SHA}-${{ github.run_number }}"
+          # Write to GITHUB_OUTPUT so later steps can use ${{ steps.versioning.outputs.image_tag }}
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          # Write to GITHUB_ENV so later bash run: blocks can use $IMAGE_TAG directly
           echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_ENV"
           echo "🏷️  Image tag: ${IMAGE_TAG}"
 
@@ -178,7 +197,7 @@ jobs:
       #   &   → background process operator
       #   *   → glob expansion
       #
-      # The WRONG approach (what was here before):
+      # The WRONG approach (what caused exit code 127 before):
       #   echo "${{ secrets.MAVEN_SETTINGS_XML }}" > ~/.m2/settings.xml
       #
       #   GitHub Actions expands ${{ secrets.MAVEN_SETTINGS_XML }} inline
@@ -259,6 +278,35 @@ jobs:
       # Uses Maven Sonar plugin — same as Jenkinsfile.
       # SONAR_TOKEN + SONAR_HOST_URL injected via env (not hardcoded).
       # Mirrors Jenkins: withSonarQubeEnv → mvn sonar:sonar
+      #
+      # FIX: -Dsonar.working.directory pin
+      # ─────────────────────────────────
+      # The SonarQube scanner writes a metadata file after every scan:
+      #   .scannerwork/report-task.txt
+      #
+      # This file contains the ceTaskId that the Quality Gate action
+      # (sonarsource/sonarqube-quality-gate-action) uses to poll
+      # SonarQube for the gate result. Without it, the Quality Gate
+      # step immediately fails with:
+      #   ".scannerwork/report-task.txt does not exist."
+      #
+      # By default, the scanner writes this file relative to wherever
+      # Maven's working directory is. If Maven runs from a subdirectory,
+      # or if sonar.working.directory is not explicitly set, the file
+      # lands in a different path than the workspace root — and the
+      # Quality Gate action, which always looks in
+      # ${{ github.workspace }}/.scannerwork/report-task.txt, cannot
+      # find it.
+      #
+      # The fix: explicitly set -Dsonar.working.directory to an absolute
+      # path anchored at $GITHUB_WORKSPACE. This guarantees the file
+      # is always written to the exact location the Quality Gate action
+      # expects, regardless of where Maven's CWD is.
+      #
+      # Note: $GITHUB_WORKSPACE is a runner shell variable — it equals
+      # the absolute path to the checked-out repo root, e.g.:
+      #   /home/runner/work/java-monolith-app/java-monolith-app
+      # Using it here makes the path portable across any runner.
       # ──────────────────────────────────────────────────────
       - name: SonarQube — static analysis
         env:
@@ -272,6 +320,7 @@ jobs:
             -Dsonar.token="${SONAR_TOKEN}" \
             -Dsonar.java.binaries=target/classes \
             -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
+            -Dsonar.working.directory="${GITHUB_WORKSPACE}/.scannerwork" \
             -B --no-transfer-progress
 
       # ──────────────────────────────────────────────────────
@@ -279,10 +328,33 @@ jobs:
       # Polls SonarQube until webhook result arrives.
       # Fails the job if Quality Gate is not passed.
       # Mirrors Jenkins: waitForQualityGate abortPipeline: true
+      #
+      # FIX: scanMetadataReportFile explicit path
+      # ─────────────────────────────────────────
+      # The Quality Gate action reads .scannerwork/report-task.txt
+      # to find the ceTaskId, then polls SonarQube until the gate
+      # status is GREEN or RED.
+      #
+      # scanMetadataReportFile tells the action exactly where to find
+      # the file. We pin it to ${{ github.workspace }}/.scannerwork/
+      # report-task.txt — the same absolute path we told the scanner
+      # to write to via -Dsonar.working.directory above.
+      #
+      # This two-part fix is essential:
+      #   Part A (Stage 5): -Dsonar.working.directory pins WHERE the
+      #                     scanner writes the file.
+      #   Part B (Stage 6): scanMetadataReportFile pins WHERE the
+      #                     Quality Gate action reads the file.
+      # Both must point to the same absolute path. If only one is
+      # set, the fix is incomplete.
       # ──────────────────────────────────────────────────────
       - name: SonarQube — Quality Gate check
         uses: sonarsource/sonarqube-quality-gate-action@v1.1.0
         timeout-minutes: 5
+        with:
+          # Explicit path to the scanner metadata file written by Stage 5.
+          # Must match -Dsonar.working.directory set in the sonar:sonar command.
+          scanMetadataReportFile: ${{ github.workspace }}/.scannerwork/report-task.txt
         env:
           SONAR_TOKEN:    ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
@@ -302,6 +374,26 @@ jobs:
       # Build once, tag for all three registries.
       # OCI labels for full image traceability.
       # Mirrors Jenkins: docker build -t ... (multi-tag)
+      #
+      # WHY load: true and push: false HERE:
+      # ─────────────────────────────────────
+      # We need the image to exist in the LOCAL Docker daemon so that:
+      #   1. Trivy (Stage 9) can scan it with: trivy image <name>:<tag>
+      #      Trivy's image scan mode calls the Docker daemon API directly.
+      #      If the image is not in the daemon, Trivy fails with:
+      #      "unable to find the specified image"
+      #   2. We can docker push it manually in Stages 10–12.
+      #
+      # load: true  → builds the image and loads it into the local Docker daemon
+      # push: false → does NOT push to any registry at this step
+      #
+      # load: true and push: true CANNOT be used together with multi-platform
+      # builds. Since we are on a single amd64 runner and not doing multi-arch,
+      # load: true is safe here.
+      #
+      # The push happens separately in Stages 10, 11, 12 via docker push.
+      # This gives us the security gate (Trivy scan) BEFORE any image
+      # reaches a registry — the core DevSecOps principle.
       # ──────────────────────────────────────────────────────
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -310,19 +402,19 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context:  ${{ env.APP_DIR }}
-          push:     false
-          load:     true
+          push:     false   # push happens after Trivy scan in Stages 10-12
+          load:     true    # load into local Docker daemon so Trivy can scan it
           tags: |
-            ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
             ${{ env.IMAGE_NAME }}:latest
-            ${{ env.GHCR_IMAGE }}:${{ env.IMAGE_TAG }}
+            ${{ env.GHCR_IMAGE }}:${{ steps.versioning.outputs.image_tag }}
             ${{ env.GHCR_IMAGE }}:latest
-            ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:${{ env.IMAGE_TAG }}
+            ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:${{ steps.versioning.outputs.image_tag }}
             ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest
           build-args: |
             SERVER_PORT=8000
           labels: |
-            org.opencontainers.image.version=${{ env.IMAGE_TAG }}
+            org.opencontainers.image.version=${{ steps.versioning.outputs.image_tag }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -334,12 +426,51 @@ jobs:
       # Scans built image BEFORE pushing — fail-fast principle.
       # CRITICAL → fail build. HIGH/MEDIUM/LOW → warn only.
       # Mirrors Jenkins: trivy image --exit-code 1 --severity CRITICAL
+      #
+      # FIX: image-ref uses steps.versioning.outputs.image_tag
+      # ────────────────────────────────────────────────────────
+      # ROOT CAUSE OF THE PREVIOUS FAILURE:
+      #   image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+      #
+      # ${{ env.IMAGE_TAG }} reads the workflow-level env: block.
+      # That block is evaluated at PARSE TIME — before any step runs.
+      # IMAGE_TAG is not defined there (it is computed at runtime in
+      # the Versioning step), so ${{ env.IMAGE_TAG }} resolves to an
+      # empty string. The image-ref becomes:
+      #   mibtisam/bankapp:
+      # which does not exist in the daemon → Trivy error:
+      #   "unable to find the specified image"
+      #
+      # There are TWO ways to reference a runtime-computed value:
+      #
+      #   Option A — ${{ steps.versioning.outputs.image_tag }}
+      #     Reads from the step output written to $GITHUB_OUTPUT.
+      #     Evaluated at STEP EXECUTION TIME, not parse time.
+      #     Works in any ${{ }} expression in any later step.
+      #     ✅ Used here — correct for ${{ }} expressions.
+      #
+      #   Option B — $IMAGE_TAG  (in a bash run: block only)
+      #     Reads from the runner OS environment set via $GITHUB_ENV.
+      #     Only available inside run: shell scripts.
+      #     ✅ Used in bash steps like docker push, git commit, etc.
+      #
+      #   Option C — ${{ env.IMAGE_TAG }}
+      #     Reads the STATIC workflow-level env: block.
+      #     ❌ Does NOT see values written to $GITHUB_ENV at runtime.
+      #     ❌ Was the bug — always empty for dynamic tags.
+      #
+      # Rule of thumb:
+      #   In ${{ }} expressions → use steps.<id>.outputs.<name>
+      #   In bash run: blocks   → use $VAR_NAME (from $GITHUB_ENV)
+      #   Never use ${{ env.X }} for runtime-computed variables
       # ──────────────────────────────────────────────────────
       - name: Trivy — image scan (CRITICAL → fail)
         uses: aquasecurity/trivy-action@0.35.0
         with:
           scan-type:  image
-          image-ref:  ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          # Use step output reference — resolves at execution time, not parse time.
+          # This is the runtime tag computed in the Versioning step.
+          image-ref:  ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
           severity:   CRITICAL
           exit-code:  '1'
           format:     json
@@ -350,7 +481,7 @@ jobs:
         if: always()
         with:
           scan-type:  image
-          image-ref:  ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          image-ref:  ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
           severity:   HIGH,MEDIUM,LOW
           exit-code:  '0'
           format:     table
@@ -376,7 +507,8 @@ jobs:
 
       - name: Docker Hub — push image
         run: |
-          docker push ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          # $IMAGE_TAG is available here from $GITHUB_ENV (set in Versioning step)
+          docker push ${{ env.IMAGE_NAME }}:$IMAGE_TAG
           docker push ${{ env.IMAGE_NAME }}:latest
 
       # ──────────────────────────────────────────────────────
@@ -393,7 +525,7 @@ jobs:
 
       - name: GHCR — push image
         run: |
-          docker push ${{ env.GHCR_IMAGE }}:${{ env.IMAGE_TAG }}
+          docker push ${{ env.GHCR_IMAGE }}:$IMAGE_TAG
           docker push ${{ env.GHCR_IMAGE }}:latest
 
       # ──────────────────────────────────────────────────────
@@ -410,7 +542,7 @@ jobs:
 
       - name: Nexus — push image (path-based routing)
         run: |
-          docker push ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:${{ env.IMAGE_TAG }}
+          docker push ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:$IMAGE_TAG
           docker push ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest
 
       # ──────────────────────────────────────────────────────
@@ -431,9 +563,9 @@ jobs:
       #   run: |
       #     ECR_REGISTRY="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com"
       #     ECR_IMAGE="${ECR_REGISTRY}/${{ env.APP_NAME }}"
-      #     docker tag ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }} "${ECR_IMAGE}:${{ env.IMAGE_TAG }}"
-      #     docker tag ${{ env.IMAGE_NAME }}:latest               "${ECR_IMAGE}:latest"
-      #     docker push "${ECR_IMAGE}:${{ env.IMAGE_TAG }}"
+      #     docker tag ${{ env.IMAGE_NAME }}:$IMAGE_TAG "${ECR_IMAGE}:${IMAGE_TAG}"
+      #     docker tag ${{ env.IMAGE_NAME }}:latest     "${ECR_IMAGE}:latest"
+      #     docker push "${ECR_IMAGE}:${IMAGE_TAG}"
       #     docker push "${ECR_IMAGE}:latest"
       # ──────────────────────────────────────────────────────
 
@@ -473,10 +605,10 @@ jobs:
       - name: Cleanup — remove local Docker images
         if: always()
         run: |
-          docker rmi ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}                                                          || true
-          docker rmi ${{ env.IMAGE_NAME }}:latest                                                                        || true
-          docker rmi ${{ env.GHCR_IMAGE }}:${{ env.IMAGE_TAG }}                                                         || true
-          docker rmi ${{ env.GHCR_IMAGE }}:latest                                                                       || true
-          docker rmi ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:${{ env.IMAGE_TAG }}     || true
-          docker rmi ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest                   || true
+          docker rmi ${{ env.IMAGE_NAME }}:$IMAGE_TAG                                                              || true
+          docker rmi ${{ env.IMAGE_NAME }}:latest                                                                  || true
+          docker rmi ${{ env.GHCR_IMAGE }}:$IMAGE_TAG                                                             || true
+          docker rmi ${{ env.GHCR_IMAGE }}:latest                                                                  || true
+          docker rmi ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:$IMAGE_TAG          || true
+          docker rmi ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest              || true
           rm -rf cd-repo
