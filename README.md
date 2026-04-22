@@ -1,5 +1,7 @@
 # Java Monolith Application
 
+[![DevSecOps CI — Java Monolith](https://github.com/ibtisam-iq/java-monolith-app/actions/workflows/ci.yml/badge.svg)](https://github.com/ibtisam-iq/java-monolith-app/actions/workflows/ci.yml)
+
 ## Overview
 
 This is a Java Spring Boot-based monolithic banking web application serving as the **source codebase** for two downstream DevOps projects:
