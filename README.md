@@ -189,7 +189,7 @@ docker compose down -v
 
 ### Step 4 — DevSecOps Pipelines (CI/CD)
 
-With the application containerized and the registry strategy confirmed, I moved to automating the full build-test-scan-publish cycle. I ran the Jenkins pipeline against my own self-hosted CI/CD stack — Jenkins, SonarQube, and Nexus — provisioned and documented separately in [silver-stack](https://nectar.ibtisam-iq.com/operations/cicd-stack/self-hosted-jenkins-sonarqube-nexus/). The same 14 stages were then mirrored in GitHub Actions, giving both a self-hosted and a zero-infrastructure path through the identical pipeline.
+With the application containerized and the registry strategy confirmed, I moved to automating the full build-test-scan-publish cycle. I ran the Jenkins pipeline against my own self-hosted CI/CD stack — Jenkins, SonarQube, and Nexus — provisioned and documented at [nectar.ibtisam-iq.com](https://nectar.ibtisam-iq.com/operations/cicd-stack/self-hosted-jenkins-sonarqube-nexus/). The same 14 stages were then mirrored in GitHub Actions, giving both a self-hosted and a zero-infrastructure path through the identical pipeline.
 
 **Pipeline stages (both implementations):**
 
@@ -214,11 +214,11 @@ The build fails hard on three conditions: Trivy finds CRITICAL CVEs in JAR depen
 
 #### Jenkins
 
-The pipeline is defined in `Jenkinsfile` at the repo root using Jenkins declarative syntax, designed to run on any Jenkins instance without shared libraries or scripted blocks — just point a job at this repo. The non-obvious design decisions, stage-level rationale, and every problem I hit while building it are documented in [`docs/understand-jenkinsfile.md`](docs/understand-jenkinsfile.md).
+Built as a fully declarative pipeline in `Jenkinsfile` — no shared libraries, no scripted blocks. The file itself became a learning artifact: every stage has inline rationale, and the design decisions that were not obvious — credential scoping, publisher placement, agent behaviour — are documented in [`docs/understand-jenkinsfile.md`](docs/understand-jenkinsfile.md).
 
 #### GitHub Actions
 
-The same pipeline runs in `.github/workflows/ci.yml` on GitHub-hosted runners — no server provisioning needed. It triggers on push and pull request to `main`, with path filters so documentation-only changes do not trigger a build. The Trivy scan strategy and why the filesystem and image scan gates are configured differently are explained in [`docs/trivy-troubleshooting.md`](docs/trivy-troubleshooting.md). SonarQube Quality Gate wiring specifics are in [`docs/sonarqube-troubleshooting.md`](docs/sonarqube-troubleshooting.md).
+Mirrored in `.github/workflows/ci.yml`, with two decisions worth calling out: Trivy runs as split passes with different exit codes for OS packages versus JAR dependencies — rationale in [`docs/trivy-troubleshooting.md`](docs/trivy-troubleshooting.md) — and the SonarQube Quality Gate requires a specific working directory pin to reliably locate `report-task.txt` across runs, documented in [`docs/sonarqube-troubleshooting.md`](docs/sonarqube-troubleshooting.md).
 
 #### Built Docker Images
 
