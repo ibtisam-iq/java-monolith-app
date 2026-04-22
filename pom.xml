@@ -8,21 +8,28 @@
     <!--
         PARENT — Spring Boot BOM (Bill of Materials)
         =============================================
-        This <parent> is not just an artifact — it is a hidden dependency
-        spreadsheet. It silently injects versions for ALL transitive libraries
-        (Tomcat, Spring Security, Spring Framework, Logback, Jackson, etc.)
-        at build time. You never see those versions in this file.
+        This <parent> is a hidden dependency spreadsheet. It silently injects
+        versions for ALL transitive libraries at build time. You never see
+        those versions in this file — the BOM supplies them.
 
-        UPGRADE: 3.4.4 → 3.4.5
-        Reason: 3.4.5 ships with updated BOM entries that patch the majority
-        of CRITICAL/HIGH CVEs found in the 3.4.4 image scan (2026-04-22).
-        Individual <properties> overrides below handle anything still unpatched
-        after this parent bump.
+        VERSION: 3.4.5 (upgraded from 3.4.4 on 2026-04-22 to patch CVEs)
 
-        HOW TO OVERRIDE A BOM VERSION:
-        Maven resolves <properties> BEFORE the BOM. Defining a property key
-        that the BOM uses internally (e.g. tomcat.version) makes your value
-        win. This is the officially documented Spring Boot mechanism:
+        TWO MECHANISMS TO OVERRIDE BOM VERSIONS:
+
+        1. <properties> key override:
+           Maven resolves <properties> before the BOM. If the BOM uses a
+           known property key (e.g. tomcat.version), your value wins.
+           CAVEAT: Only works when the BOM actually reads that property key.
+           Some libraries (e.g. Thymeleaf in 3.4.5) do NOT expose a key,
+           so the property override silently has no effect.
+
+        2. <dependencyManagement> block:
+           Entries declared in your own pom.xml ALWAYS win over the parent
+           BOM — this is a Maven specification guarantee, not a Spring Boot
+           convention. Use this when <properties> override fails or when
+           you need a library pinned to a version the BOM does not expose.
+
+        Reference:
         https://docs.spring.io/spring-boot/docs/current/reference/html/dependency-versions.html
     -->
 	<parent>
@@ -58,121 +65,175 @@
 		</developer>
 	</developers>
 
-  <scm>
-    <connection>scm:git:https://github.com/ibtisam-iq/java-monolith-app.git</connection>
-    <developerConnection>scm:git:git@github.com:ibtisam-iq/java-monolith-app.git</developerConnection>
-    <url>https://github.com/ibtisam-iq/java-monolith-app</url>
-    <tag>HEAD</tag>
-  </scm>
+	<scm>
+		<connection>scm:git:https://github.com/ibtisam-iq/java-monolith-app.git</connection>
+		<developerConnection>scm:git:git@github.com:ibtisam-iq/java-monolith-app.git</developerConnection>
+		<url>https://github.com/ibtisam-iq/java-monolith-app</url>
+		<tag>HEAD</tag>
+	</scm>
 
 	<properties>
-        <!-- Java 21: current LTS, supported until 2028 -->
+		<!-- Java 21: current LTS, supported until 2028 -->
 		<java.version>21</java.version>
 
-        <!-- JaCoCo 0.8.12: latest stable -->
+		<!-- JaCoCo 0.8.12: latest stable -->
 		<jacoco.version>0.8.12</jacoco.version>
 
 		<sonar.language>java</sonar.language>
 
-        <!--
-            ================================================================
-            SECURITY PATCH: BOM VERSION OVERRIDES — April 2026
-            ================================================================
-            CONTEXT:
-            After bumping the parent to 3.4.5, most CVEs are resolved by the
-            updated BOM. The overrides below patch the remaining findings that
-            3.4.5's BOM still does not cover.
+		<!--
+			================================================================
+			SECURITY PATCH: BOM VERSION OVERRIDES — April 2026
+			================================================================
+			CONTEXT:
+			Spring Boot 3.4.5 parent BOM still pins several libraries at
+			vulnerable versions. The overrides below patch what the BOM does
+			not cover. Where <properties> keys are unreliable (Thymeleaf),
+			we use <dependencyManagement> instead — see that block below.
 
-            STRATEGY (in priority order):
-              1. Bump parent BOM first — fixes the most CVEs in one shot.
-              2. Add individual property overrides — for anything still unpatched.
-              3. NEVER set exit-code: 0 on Trivy — that hides vulnerabilities.
-              4. NEVER use .trivyignore for CVEs with an available fix.
+			STRATEGY (in priority order):
+			  1. Bump parent BOM — resolves most CVEs in one shot.
+			  2. <properties> override — for libs where BOM exposes a key.
+			  3. <dependencyManagement> override — guaranteed winner, used
+			     when property key is missing or unreliable.
+			  4. NEVER set exit-code: 0 on Trivy (hides vulnerabilities).
+			  5. NEVER use .trivyignore for CVEs with an available fix.
 
-            TO VERIFY AFTER BUILD:
-              mvn dependency:tree | grep -E "tomcat|spring-security|spring-framework|logback|jackson"
-            Expected: all versions should match the values defined below.
-            ================================================================
-        -->
+			TO VERIFY AFTER BUILD:
+			  mvn dependency:tree | grep -E "tomcat|spring-security|spring-framework|thymeleaf|logback|jackson"
+			================================================================
+		-->
 
-        <!--
-            TOMCAT OVERRIDE
-            3.4.5 BOM pins : 10.1.53  (still has CVE-2026-34483, CVE-2026-34487 HIGH)
-            Patched to     : 10.1.54
-            CVEs fixed     : CVE-2026-34483 (HIGH) — info disclosure via
-                               improper encoding in JsonAccessLogValve.
-                             CVE-2026-34487 (HIGH) — info disclosure via
-                               sensitive data written to log files.
-                             CVE-2026-34500 (MEDIUM) — auth bypass via
-                               client certificate misconfiguration.
-            Ref            : https://avd.aquasec.com/nvd/cve-2026-34483
-                             https://avd.aquasec.com/nvd/cve-2026-34487
-                             https://avd.aquasec.com/nvd/cve-2026-34500
-        -->
-        <tomcat.version>10.1.54</tomcat.version>
+		<!--
+			TOMCAT OVERRIDE
+			3.4.5 BOM pins : 10.1.53
+			Patched to     : 10.1.54
+			CVEs fixed     : CVE-2026-34483 (HIGH) — info disclosure via
+			                   improper encoding in JsonAccessLogValve.
+			                 CVE-2026-34487 (HIGH) — info disclosure via
+			                   sensitive data written to log files.
+			                 CVE-2026-34500 (MEDIUM) — auth bypass via
+			                   client certificate misconfiguration.
+			Ref            : https://avd.aquasec.com/nvd/cve-2026-34483
+			                 https://avd.aquasec.com/nvd/cve-2026-34487
+		-->
+		<tomcat.version>10.1.54</tomcat.version>
 
-        <!--
-            SPRING SECURITY OVERRIDE
-            3.4.5 BOM pins : 6.4.x  (CVE-2026-22732 CRITICAL needs 6.4.10+)
-            Patched to     : 6.4.10
-            CVEs fixed     : CVE-2026-22732 (CRITICAL) — security policy bypass
-                               and information disclosure in spring-security-web.
-                             CVE-2025-41248 (HIGH) — authorization bypass in
-                               spring-security-core.
-                             CVE-2025-41232 (CRITICAL, prev run) — method
-                               security bypass on private methods.
-            Ref            : https://avd.aquasec.com/nvd/cve-2026-22732
-                             https://avd.aquasec.com/nvd/cve-2025-41248
-            Scope          : Patches spring-security-core AND spring-security-web
-                             (both share this single property key).
-        -->
-        <spring-security.version>6.4.10</spring-security.version>
+		<!--
+			SPRING SECURITY OVERRIDE
+			3.4.5 BOM pins : 6.4.x branch
+			Patched to     : 6.5.9
 
-        <!--
-            SPRING FRAMEWORK OVERRIDE
-            3.4.5 BOM pins : 6.2.x
-            Patched to     : 6.2.17
-            CVEs fixed     : CVE-2025-41249 (HIGH) — annotation detection
-                               vulnerability in spring-core.
-                             CVE-2025-41234 (MEDIUM) — reflected download attack
-                               via non-ASCII headers in spring-web.
-                             CVE-2025-41242 (MEDIUM) — MVC path traversal in
-                               spring-webmvc.
-                             CVE-2026-22737 (MEDIUM) — information disclosure
-                               via scripting engine templates in spring-webmvc.
-            Ref            : https://avd.aquasec.com/nvd/cve-2025-41249
-                             https://avd.aquasec.com/nvd/cve-2025-41234
-                             https://avd.aquasec.com/nvd/cve-2025-41242
-                             https://avd.aquasec.com/nvd/cve-2026-22737
-            Scope          : Patches spring-core, spring-web, and spring-webmvc
-                             (all share this single property key).
-        -->
-        <spring-framework.version>6.2.17</spring-framework.version>
+			WHY 6.5.9 AND NOT 6.4.x?
+			CVE-2026-22732 (CRITICAL) is NOT patched in ANY 6.4.x release.
+			Trivy explicitly states: Fixed Version = 6.5.9, 7.0.4
+			There is no 6.4.x release that resolves this CVE — the fix was
+			backported only into 6.5.x and 7.0.x branches.
 
-        <!--
-            LOGBACK OVERRIDE
-            3.4.5 BOM pins : 1.5.18
-            Patched to     : 1.5.19
-            CVE fixed      : CVE-2025-11226 (MEDIUM) — conditional arbitrary
-                               code execution in logback-core.
-            Ref            : https://avd.aquasec.com/nvd/cve-2025-11226
-        -->
-        <logback.version>1.5.19</logback.version>
+			COMPATIBILITY:
+			Spring Security 6.5.x is compatible with Spring Boot 3.4.x.
+			Spring Boot does not lock you to a Security minor version —
+			only the Spring Framework major version is constrained.
 
-        <!--
-            JACKSON OVERRIDE
-            3.4.5 BOM pins : 2.18.x
-            Patched to     : 2.18.6
-            Advisory fixed : GHSA-72hv-8253-57qq (MEDIUM) — number length
-                               constraint bypass in async parser, potential DoS.
-            Ref            : https://github.com/advisories/GHSA-72hv-8253-57qq
-            Note           : Jackson uses jackson-bom.version as the BOM key,
-                             not jackson.version. Using the wrong key silently
-                             has no effect — the BOM value wins instead.
-        -->
-        <jackson-bom.version>2.18.6</jackson-bom.version>
+			CVEs fixed     : CVE-2026-22732 (CRITICAL) — security policy bypass
+			                   and info disclosure in spring-security-web.
+			                 CVE-2025-41248 (HIGH) — authorization bypass in
+			                   spring-security-core.
+			                 CVE-2025-41232 (CRITICAL, prior run) — method
+			                   security bypass on private methods.
+			Ref            : https://avd.aquasec.com/nvd/cve-2026-22732
+			                 https://avd.aquasec.com/nvd/cve-2025-41248
+			Scope          : Patches spring-security-core AND spring-security-web
+			                 (both share this single property key).
+		-->
+		<spring-security.version>6.5.9</spring-security.version>
+
+		<!--
+			SPRING FRAMEWORK OVERRIDE
+			3.4.5 BOM pins : 6.2.x
+			Patched to     : 6.2.17
+			CVEs fixed     : CVE-2025-41249 (HIGH) — annotation detection flaw.
+			                 CVE-2025-41234 (MEDIUM) — reflected download attack.
+			                 CVE-2025-41242 (MEDIUM) — MVC path traversal.
+			                 CVE-2026-22737 (MEDIUM) — info disclosure via templates.
+			Scope          : Patches spring-core, spring-web, spring-webmvc.
+		-->
+		<spring-framework.version>6.2.17</spring-framework.version>
+
+		<!--
+			LOGBACK OVERRIDE
+			3.4.5 BOM pins : 1.5.18
+			Patched to     : 1.5.19
+			CVE fixed      : CVE-2025-11226 (MEDIUM) — conditional arbitrary
+			                   code execution in logback-core.
+		-->
+		<logback.version>1.5.19</logback.version>
+
+		<!--
+			JACKSON OVERRIDE
+			3.4.5 BOM pins : 2.18.x
+			Patched to     : 2.18.6
+			Advisory fixed : GHSA-72hv-8253-57qq (MEDIUM) — DoS via async parser.
+			Note           : Key is jackson-bom.version, NOT jackson.version.
+			                 Wrong key = silently no effect (BOM wins instead).
+		-->
+		<jackson-bom.version>2.18.6</jackson-bom.version>
 
 	</properties>
+
+	<!--
+		================================================================
+		DEPENDENCY MANAGEMENT — GUARANTEED BOM OVERRIDES
+		================================================================
+		WHY THIS BLOCK EXISTS (and why <properties> alone was not enough):
+
+		Thymeleaf 3.1.3.RELEASE was re-appearing even after setting
+		<thymeleaf.version>3.1.4.RELEASE</thymeleaf.version> in <properties>.
+		Reason: Spring Boot 3.4.5's BOM does not expose "thymeleaf.version"
+		as an overridable property key for this artifact. The property was
+		silently ignored and the BOM's 3.1.3 value won.
+
+		FIX: Declare versions in <dependencyManagement>. Per the Maven spec,
+		a child pom's <dependencyManagement> entries ALWAYS take precedence
+		over a parent BOM — unconditionally. This is not a Spring Boot
+		convention; it is guaranteed by the Maven dependency resolution
+		specification (nearest-definition wins, child beats parent).
+
+		CVEs resolved by this block:
+		  CVE-2026-40477 (CRITICAL) — SSTI via security bypass in expression
+		  CVE-2026-40478 (CRITICAL) — SSTI via expression execution bypass
+		  Both affect: org.thymeleaf:thymeleaf and org.thymeleaf:thymeleaf-spring6
+		Ref: https://avd.aquasec.com/nvd/cve-2026-40477
+		     https://avd.aquasec.com/nvd/cve-2026-40478
+		================================================================
+	-->
+	<dependencyManagement>
+		<dependencies>
+
+			<!--
+				Thymeleaf core engine.
+				BOM pins 3.1.3.RELEASE (CVE-2026-40477, CVE-2026-40478 CRITICAL).
+				Forcing 3.1.4.RELEASE via dependencyManagement — guaranteed to win.
+			-->
+			<dependency>
+				<groupId>org.thymeleaf</groupId>
+				<artifactId>thymeleaf</artifactId>
+				<version>3.1.4.RELEASE</version>
+			</dependency>
+
+			<!--
+				Thymeleaf Spring 6 integration dialect.
+				Same CVEs as thymeleaf core — same artifact group, same fix version.
+				Must be listed separately as it is a distinct artifact ID.
+			-->
+			<dependency>
+				<groupId>org.thymeleaf</groupId>
+				<artifactId>thymeleaf-spring6</artifactId>
+				<version>3.1.4.RELEASE</version>
+			</dependency>
+
+		</dependencies>
+	</dependencyManagement>
 
 	<dependencies>
 		<!-- Spring Boot JPA for database interactions -->
@@ -212,8 +273,8 @@
 		</dependency>
 
 		<!--
-		    Actuator: exposes /actuator/health and /actuator/info
-		    Required for Kubernetes liveness/readiness probes in deployment manifests
+			Actuator: exposes /actuator/health and /actuator/info
+			Required for Kubernetes liveness/readiness probes
 		-->
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -221,24 +282,24 @@
 		</dependency>
 
 		<!--
-		    MySQL Connector: replaced deprecated mysql:mysql-connector-java
-		    Old artifact (deprecated since 8.0.31): mysql:mysql-connector-java
-		    New artifact: com.mysql:mysql-connector-j
-		    No <version> tag — Spring Boot BOM manages compatibility automatically
+			MySQL Connector: replaced deprecated mysql:mysql-connector-java
+			Old artifact (deprecated since 8.0.31): mysql:mysql-connector-java
+			New artifact: com.mysql:mysql-connector-j
+			No <version> tag — Spring Boot BOM manages compatibility automatically
 		-->
 
 		<!-- MySQL (production / Docker Compose) -->
 		<dependency>
-    		<groupId>com.mysql</groupId>
-    		<artifactId>mysql-connector-j</artifactId>
-    		<scope>runtime</scope>
+			<groupId>com.mysql</groupId>
+			<artifactId>mysql-connector-j</artifactId>
+			<scope>runtime</scope>
 		</dependency>
 
 		<!-- H2 (local development / testing — in-memory, no server needed) -->
 		<dependency>
-    		<groupId>com.h2database</groupId>
-    		<artifactId>h2</artifactId>
-    		<scope>runtime</scope>
+			<groupId>com.h2database</groupId>
+			<artifactId>h2</artifactId>
+			<scope>runtime</scope>
 		</dependency>
 
 		<!-- Unit testing -->
@@ -270,21 +331,21 @@
 				<artifactId>jacoco-maven-plugin</artifactId>
 				<version>${jacoco.version}</version>
 				<executions>
-          <!-- 1. Instrument JVM agent before tests run -->
-          <execution>
-            <id>prepare-agent</id>
-            <goals>
-              <goal>prepare-agent</goal>
-            </goals>
-          </execution>
-          <!-- 2. Generate report AFTER tests complete (phase: test) -->
-          <execution>
-            <id>report</id>
-            <phase>test</phase>
-            <goals>
-              <goal>report</goal>
-            </goals>
-          </execution>
+					<!-- 1. Instrument JVM agent before tests run -->
+					<execution>
+						<id>prepare-agent</id>
+						<goals>
+							<goal>prepare-agent</goal>
+						</goals>
+					</execution>
+					<!-- 2. Generate report AFTER tests complete (phase: test) -->
+					<execution>
+						<id>report</id>
+						<phase>test</phase>
+						<goals>
+							<goal>report</goal>
+						</goals>
+					</execution>
 				</executions>
 			</plugin>
 		</plugins>
