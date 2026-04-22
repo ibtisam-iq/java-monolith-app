@@ -54,18 +54,16 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # ── App metadata (must match pom.xml)
-  APP_NAME:       java-monolith
-  APP_VERSION:    0.0.1-SNAPSHOT
-  GROUP_ID:       com.ibtisamiq
+  # ── App metadata
+  # APP_VERSION is intentionally NOT set here — it is extracted dynamically
+  # from pom.xml in the versioning step to avoid manual drift.
+  APP_NAME: java-monolith
 
   # ── Docker Hub
-  DOCKER_USER:    mibtisam
-  IMAGE_NAME:     mibtisam/java-monolith
+  IMAGE_NAME: mibtisam/java-monolith
 
   # ── GHCR
-  GHCR_USER:      ibtisam-iq
-  GHCR_IMAGE:     ghcr.io/ibtisam-iq/java-monolith
+  GHCR_IMAGE: ghcr.io/ibtisam-iq/java-monolith
 
   # ── Nexus Docker (path-based routing — no dedicated port needed)
   NEXUS_DOCKER:      nexus.ibtisam-iq.com
@@ -76,6 +74,9 @@ env:
 
   # ── Java / Maven
   JAVA_VERSION: '21'
+  # CI-only JVM flags: -XX:TieredStopAtLevel=1 disables the C2 JIT compiler,
+  # trading peak runtime performance for faster startup/compilation in CI.
+  # Do NOT use these flags in production JVM configuration.
   MAVEN_OPTS: >-
     -Xmx1g
     -XX:+TieredCompilation
@@ -114,31 +115,34 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 2 — Trivy Filesystem Scan
-      # Runs BEFORE build — fail-fast on CRITICAL findings.
-      # Two passes: CRITICAL (fail) + HIGH/MEDIUM (warn only).
-      # Mirrors Jenkins: trivy fs --scanners secret,vuln,misconfig
+      # Runs BEFORE build — scan source + pom.xml for secrets,
+      # misconfigs, and known CVEs in declared dependencies.
+      # Two passes: CRITICAL (warn only) + HIGH/MEDIUM (warn only).
+      # exit-code: '0' on both passes — filesystem scan is advisory;
+      # the hard security gate is on the built image (Stage 9, Pass B).
+      # See docs/trivy-troubleshooting.md for full rationale.
       # ──────────────────────────────────────────────────────
-      - name: Trivy — filesystem scan (CRITICAL → fail)
+      - name: Trivy — filesystem scan (CRITICAL → warn only)
         uses: aquasecurity/trivy-action@0.35.0
         with:
-          scan-type:  fs
-          scan-ref:   ${{ env.APP_DIR }}
-          scanners:   secret,vuln,misconfig
-          severity:   CRITICAL
-          exit-code:  '0'                    # Temporarily suppress (not recommended for prod)
-          format:     json
-          output:     trivy-fs-report.json
+          scan-type: fs
+          scan-ref:  ${{ env.APP_DIR }}
+          scanners:  secret,vuln,misconfig
+          severity:  CRITICAL
+          exit-code: '0'
+          format:    json
+          output:    trivy-fs-report.json
 
       - name: Trivy — filesystem scan (HIGH/MEDIUM → warn only)
         uses: aquasecurity/trivy-action@0.35.0
         if: always()
         with:
-          scan-type:  fs
-          scan-ref:   ${{ env.APP_DIR }}
-          scanners:   secret,vuln,misconfig
-          severity:   HIGH,MEDIUM
-          exit-code:  '0'
-          format:     table
+          scan-type: fs
+          scan-ref:  ${{ env.APP_DIR }}
+          scanners:  secret,vuln,misconfig
+          severity:  HIGH,MEDIUM
+          exit-code: '0'
+          format:    table
 
       - name: Upload Trivy FS report
         uses: actions/upload-artifact@v4
@@ -150,6 +154,8 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 3 — Versioning
+      # APP_VERSION is read from pom.xml at runtime so the image tag
+      # always matches the artifact version without manual sync.
       # Format: <pom-version>-<short-sha>-<run-number>
       # e.g.   0.0.1-SNAPSHOT-ab3f12c-42
       #
@@ -166,6 +172,7 @@ jobs:
       - name: Versioning — compute image tag
         id: versioning
         run: |
+          APP_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
           SHORT_SHA=$(git rev-parse --short HEAD)
           IMAGE_TAG="${APP_VERSION}-${SHORT_SHA}-${{ github.run_number }}"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
@@ -257,141 +264,112 @@ jobs:
         run: mvn deploy -DskipTests -B --no-transfer-progress
 
       # ──────────────────────────────────────────────────────
-      # STAGE 8 — Docker Build
-      # load: true  → image loaded into local daemon for Trivy scan
-      # push: false → push happens AFTER Trivy passes (Stages 10-12)
+      # STAGE 8 — Registry Logins (BEFORE build)
+      # All three registry logins happen here so that the image
+      # tag resolution and daemon availability are guaranteed
+      # before docker build runs in the next step.
       # ──────────────────────────────────────────────────────
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Docker Build — build image (load into daemon for scan + push)
-        uses: docker/build-push-action@v6
+      - name: Docker Hub — login
+        uses: docker/login-action@v3
         with:
-          context:  ${{ env.APP_DIR }}
-          push:     false
-          load:     true
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.GHCR_IMAGE }}:${{ steps.versioning.outputs.image_tag }}
-            ${{ env.GHCR_IMAGE }}:latest
-            ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:${{ steps.versioning.outputs.image_tag }}
-            ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest
-          build-args: |
-            SERVER_PORT=8000
-          labels: |
-            org.opencontainers.image.version=${{ steps.versioning.outputs.image_tag }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-          cache-from: type=gha
-          cache-to:   type=gha,mode=max
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: GHCR — login
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Nexus — login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.NEXUS_DOCKER }}
+          username: ${{ secrets.NEXUS_USERNAME }}
+          password: ${{ secrets.NEXUS_PASSWORD }}
 
       # ──────────────────────────────────────────────────────
-      # STAGE 9 — Trivy Image Scan
+      # STAGE 9 — Docker Build
+      # Plain `docker build` is used intentionally — NOT docker/build-push-action.
+      # Reason: build-push-action with load:true uses BuildKit's internal store,
+      # which is NOT accessible to the Docker daemon. Trivy (Stage 10) scans via
+      # the Docker daemon, so the image must land there.
+      # Plain docker build writes directly to the Docker daemon — Trivy can see it.
+      # push: false at this stage — push happens AFTER Trivy passes (Stages 11-13).
+      # See docs/trivy-troubleshooting.md for the full investigation.
       # ──────────────────────────────────────────────────────
-      # WHY THREE SEPARATE SCAN PASSES:
-      # ───────────────────────────────
-      # A Docker image contains TWO distinct layers of software:
-      #
-      #   1. OS packages — installed by the base image maintainer
-      #      (apt packages: glibc, openssl, zlib, libcurl, etc.)
-      #      Responsibility: BASE IMAGE VENDOR (Canonical/Eclipse Temurin team)
-      #      You cannot fix these by changing your code or pom.xml.
-      #      If Canonical has not released a patch yet, there is NOTHING you can do
-      #      except wait for the next base image update or switch base image.
-      #      Failing the build on unfixed OS CVEs blocks you indefinitely on issues
-      #      you have zero control over.
-      #
-      #   2. Library (JAR) vulnerabilities — dependencies declared in pom.xml
-      #      (Spring Boot, Hibernate, Jackson, Tomcat, Log4j, etc.)
-      #      Responsibility: YOU — the application developer.
-      #      These ARE fixable by upgrading the version in pom.xml.
-      #      CRITICAL JAR CVEs should always fail the build.
-      #
-      # The industry-standard approach (used at Google, Netflix, Shopify, etc.):
-      #
-      #   Pass A — OS packages only (vuln-type: os)
-      #     exit-code: '0' — WARN only, never fail
-      #     Reason: OS CVEs are the vendor's responsibility. The Ubuntu Jammy
-      #     base image (eclipse-temurin:21-jre-jammy) may have some packages
-      #     that Canonical has assessed as "negligible" or "not backported" even
-      #     though NVD scores them CRITICAL. Canonical's security team deliberately
-      #     does not backport certain fixes because the CVE is not exploitable in
-      #     the Ubuntu packaging context. Trivy reports them anyway (NVD score).
-      #     Failing on these creates permanent pipeline blockage you cannot resolve.
-      #
-      #   Pass B — Library (JAR) vulnerabilities only (vuln-type: library)
-      #     CRITICAL → exit-code: '1' (fail the build)
-      #     HIGH/MEDIUM → exit-code: '0' (warn only)
-      #     Reason: These are Spring Boot / Hibernate / Jackson CVEs in YOUR
-      #     pom.xml. You own them. Fix = bump the version in pom.xml.
-      #
-      #   Pass C — All severities, full report for audit trail
-      #     exit-code: '0', format: json, uploaded as artifact
-      #     Reason: Security audit trail. Even OS CVEs should be visible and
-      #     tracked. This report goes to the artifact store for review.
-      #
-      # This split is the CORRECT production approach — not a workaround.
-      # It enforces accountability at the right layer:
-      #   Your code → your responsibility → fail the build
-      #   Vendor's OS → vendor's responsibility → warn + track
+      - name: Docker Build — build image into local daemon for Trivy scan
+        run: |
+          docker build \
+            --build-arg SERVER_PORT=8000 \
+            --label "org.opencontainers.image.version=${{ steps.versioning.outputs.image_tag }}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            -t ${{ env.IMAGE_NAME }}:$IMAGE_TAG \
+            -t ${{ env.IMAGE_NAME }}:latest \
+            -t ${{ env.GHCR_IMAGE }}:$IMAGE_TAG \
+            -t ${{ env.GHCR_IMAGE }}:latest \
+            -t ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:$IMAGE_TAG \
+            -t ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest \
+            ${{ env.APP_DIR }}
+
+      # ──────────────────────────────────────────────────────
+      # STAGE 10 — Trivy Image Scan
+      # Three passes — full rationale in docs/trivy-troubleshooting.md.
+      # Summary:
+      #   Pass A — OS packages (vendor's responsibility) → warn only
+      #   Pass B — Library/JAR CVEs (your pom.xml)      → CRITICAL fails build
+      #   Pass C — Full report (all types + severities)  → audit artifact only
       # ──────────────────────────────────────────────────────
 
-      # Pass A — OS packages: WARN only (vendor's responsibility)
-      # vuln-type: os → only scans apt/apk/rpm installed packages
-      # exit-code: '0' → findings reported but never fail the build
-      # These CVEs are in Ubuntu Jammy base packages. Canonical decides
-      # if/when to patch them. You have no control over these.
+      # Pass A — OS packages: warn only (Canonical/vendor's responsibility)
       - name: Trivy — image scan OS packages (CRITICAL → warn only)
         uses: aquasecurity/trivy-action@0.35.0
         with:
-          scan-type:   image
-          image-ref:   ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
-          vuln-type:   os
-          severity:    CRITICAL,HIGH
-          exit-code:   '0'
-          format:      table
+          scan-type: image
+          image-ref: ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
+          vuln-type: os
+          severity:  CRITICAL,HIGH
+          exit-code: '0'
+          format:    table
 
       # Pass B — Library (JAR) CRITICALs: FAIL the build
-      # vuln-type: library → only scans JARs, npm packages, pip packages, etc.
-      # exit-code: '1' → any CRITICAL in your app dependencies fails the build
-      # These are YOUR dependencies declared in pom.xml.
-      # Fix: bump the version of the affected dependency in pom.xml.
+      # These are YOUR dependencies in pom.xml. Fix = bump version.
       - name: Trivy — image scan JAR/library (CRITICAL → fail)
         uses: aquasecurity/trivy-action@0.35.0
         with:
-          scan-type:   image
-          image-ref:   ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
-          vuln-type:   library
-          severity:    CRITICAL
-          exit-code:   '1'
-          format:      table
+          scan-type: image
+          image-ref: ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
+          vuln-type: library
+          severity:  CRITICAL
+          exit-code: '1'
+          format:    table
 
       # Pass B (cont.) — Library HIGH/MEDIUM: warn only
       - name: Trivy — image scan JAR/library (HIGH/MEDIUM → warn only)
         uses: aquasecurity/trivy-action@0.35.0
         if: always()
         with:
-          scan-type:   image
-          image-ref:   ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
-          vuln-type:   library
-          severity:    HIGH,MEDIUM
-          exit-code:   '0'
-          format:      table
+          scan-type: image
+          image-ref: ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
+          vuln-type: library
+          severity:  HIGH,MEDIUM
+          exit-code: '0'
+          format:    table
 
       # Pass C — Full report for audit trail (all vuln-types, all severities)
-      # Never fails the build. Saved as artifact for security review.
       - name: Trivy — image scan full report (audit artifact)
         uses: aquasecurity/trivy-action@0.35.0
         if: always()
         with:
-          scan-type:   image
-          image-ref:   ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
-          severity:    CRITICAL,HIGH,MEDIUM,LOW
-          exit-code:   '0'
-          format:      json
-          output:      trivy-image-report.json
+          scan-type: image
+          image-ref: ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
+          severity:  CRITICAL,HIGH,MEDIUM,LOW
+          exit-code: '0'
+          format:    json
+          output:    trivy-image-report.json
 
       - name: Upload Trivy image report (audit artifact)
         uses: actions/upload-artifact@v4
@@ -402,51 +380,31 @@ jobs:
           retention-days: 14
 
       # ──────────────────────────────────────────────────────
-      # STAGE 10 — Push to Docker Hub
+      # STAGE 11 — Push to Docker Hub
       # ──────────────────────────────────────────────────────
-      - name: Docker Hub — login
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
       - name: Docker Hub — push image
         run: |
           docker push ${{ env.IMAGE_NAME }}:$IMAGE_TAG
           docker push ${{ env.IMAGE_NAME }}:latest
 
       # ──────────────────────────────────────────────────────
-      # STAGE 11 — Push to GitHub Container Registry (GHCR)
+      # STAGE 12 — Push to GitHub Container Registry (GHCR)
       # ──────────────────────────────────────────────────────
-      - name: GHCR — login
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: GHCR — push image
         run: |
           docker push ${{ env.GHCR_IMAGE }}:$IMAGE_TAG
           docker push ${{ env.GHCR_IMAGE }}:latest
 
       # ──────────────────────────────────────────────────────
-      # STAGE 12 — Push to Nexus Docker Registry
+      # STAGE 13 — Push to Nexus Docker Registry
       # ──────────────────────────────────────────────────────
-      - name: Nexus — login
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.NEXUS_DOCKER }}
-          username: ${{ secrets.NEXUS_USERNAME }}
-          password: ${{ secrets.NEXUS_PASSWORD }}
-
       - name: Nexus — push image (path-based routing)
         run: |
           docker push ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:$IMAGE_TAG
           docker push ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest
 
       # ──────────────────────────────────────────────────────
-      # STAGE 13 — Push to AWS ECR  [PLANNED — commented out]
+      # STAGE 13b — Push to AWS ECR  [PLANNED — commented out]
       # ──────────────────────────────────────────────────────
       # - name: AWS ECR — login
       #   uses: aws-actions/amazon-ecr-login@v2
@@ -460,6 +418,10 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 14 — Update CD Repo (GitOps handoff)
+      # Runs only on push to main AND only if all prior steps succeeded
+      # (success() is the implicit default when no status function is given).
+      # This is intentional: the CD repo must only be updated when the full
+      # pipeline passes — not on PR builds or partial failures.
       # ──────────────────────────────────────────────────────
       - name: Update CD repo — GitOps image tag handoff
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -482,10 +444,17 @@ jobs:
       - name: Cleanup — remove local Docker images
         if: always()
         run: |
-          docker rmi ${{ env.IMAGE_NAME }}:$IMAGE_TAG                                                              || true
-          docker rmi ${{ env.IMAGE_NAME }}:latest                                                                  || true
-          docker rmi ${{ env.GHCR_IMAGE }}:$IMAGE_TAG                                                             || true
-          docker rmi ${{ env.GHCR_IMAGE }}:latest                                                                  || true
-          docker rmi ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:$IMAGE_TAG          || true
-          docker rmi ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest              || true
-          rm -rf cd-repo
+          docker rmi ${{ env.IMAGE_NAME }}:$IMAGE_TAG                                                             || true
+          docker rmi ${{ env.IMAGE_NAME }}:latest                                                                 || true
+          docker rmi ${{ env.GHCR_IMAGE }}:$IMAGE_TAG                                                            || true
+          docker rmi ${{ env.GHCR_IMAGE }}:latest                                                                 || true
+          docker rmi ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:$IMAGE_TAG         || true
+          docker rmi ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest             || true
+
+      # ──────────────────────────────────────────────────────
+      # Cleanup — remove cloned CD repo (if Stage 14 ran)
+      # Separated from image cleanup — these are different concerns.
+      # ──────────────────────────────────────────────────────
+      - name: Cleanup — remove cloned CD repo workspace
+        if: always()
+        run: rm -rf cd-repo
