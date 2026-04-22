@@ -9,7 +9,7 @@
 #
 # Required GitHub Secrets (Settings → Secrets and variables → Actions):
 #
-#   DOCKER_USERNAME       — Docker Hub username  (mibtisam)
+#   DOCKER_USERNAME       — Docker Hub username
 #   DOCKER_PASSWORD       — Docker Hub PAT (read/write/delete)
 #   NEXUS_USERNAME        — Nexus admin username
 #   NEXUS_PASSWORD        — Nexus admin password
@@ -27,6 +27,7 @@ on:
   push:
     branches: [main]
     paths-ignore:
+      - 'Jenkinsfile'
       - 'README.md'
       - 'docs/**'
       - 'assets/**'
@@ -36,6 +37,7 @@ on:
   pull_request:
     branches: [main]
     paths-ignore:
+      - 'Jenkinsfile'
       - 'README.md'
       - 'docs/**'
       - 'assets/**'
