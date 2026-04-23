@@ -125,7 +125,10 @@ jobs:
       # See docs/trivy-troubleshooting.md for full rationale.
       # ──────────────────────────────────────────────────────
       - name: Trivy — filesystem scan (CRITICAL → warn only)
-        uses: aquasecurity/trivy-action@0.35.0
+        # FIX #4: pinned to commit SHA of v0.35.0 — prevents supply-chain
+        # tag-mutation attacks where a semver tag is force-pushed to a
+        # malicious commit. SHA is immutable; tag is not.
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb5 # v0.35.0
         with:
           scan-type: fs
           scan-ref:  ${{ env.APP_DIR }}
@@ -136,7 +139,7 @@ jobs:
           output:    trivy-fs-report.json
 
       - name: Trivy — filesystem scan (HIGH/MEDIUM → warn only)
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb5 # v0.35.0
         if: always()
         with:
           scan-type: fs
@@ -153,6 +156,25 @@ jobs:
           name: trivy-fs-report
           path: trivy-fs-report.json
           retention-days: 14
+
+      # ──────────────────────────────────────────────────────
+      # Set up Java 21 + Maven dependency cache
+      #
+      # FIX #2: Moved BEFORE the Versioning step.
+      # The versioning step runs `mvn help:evaluate` to read the pom.xml
+      # version at runtime. That command must execute under the guaranteed
+      # temurin-21 JDK installed here — not the runner's default JDK, which
+      # may differ across ubuntu-24.04 image refreshes. Placing setup-java
+      # after versioning was a silent ordering bug: it worked only because
+      # ubuntu-24.04 happened to ship OpenJDK 21, but temurin is not
+      # pre-installed and JAVA_HOME is not guaranteed to point to Java 21.
+      # ──────────────────────────────────────────────────────
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
 
       # ──────────────────────────────────────────────────────
       # STAGE 3 — Versioning
@@ -180,16 +202,6 @@ jobs:
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_ENV"
           echo "🏷️  Image tag: ${IMAGE_TAG}"
-
-      # ──────────────────────────────────────────────────────
-      # Set up Java 21 + Maven dependency cache
-      # ──────────────────────────────────────────────────────
-      - name: Set up Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: temurin
-          cache: maven
 
       # ──────────────────────────────────────────────────────
       # Configure Maven settings (Nexus credentials)
@@ -249,6 +261,9 @@ jobs:
       # ──────────────────────────────────────────────────────
       # STAGE 6 — Quality Gate
       # scanMetadataReportFile must match -Dsonar.working.directory above.
+      # Both this step and Stage 5 run in the same job on the same runner,
+      # so ${GITHUB_WORKSPACE} (shell) and ${{ github.workspace }} (expression)
+      # resolve to the same absolute path — no cross-job mismatch risk.
       # ──────────────────────────────────────────────────────
       - name: SonarQube — Quality Gate check
         uses: sonarsource/sonarqube-quality-gate-action@v1.1.0
@@ -293,8 +308,16 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 9 — Docker Build
-      # load: true  → image loaded into local daemon for Trivy scan
+      # load: true  → image loaded into local daemon for Trivy scan (Stage 10)
       # push: false → push happens AFTER Trivy passes (Stages 11-13)
+      #
+      # FIX #6 — CONSTRAINT: load: true is INCOMPATIBLE with multi-platform
+      # builds. If you ever add `platforms: linux/amd64,linux/arm64`, Docker
+      # Buildx cannot load a multi-platform manifest into the local daemon and
+      # will error out. To enable multi-arch, you must either:
+      #   (a) build → push directly (remove load: true, set push: true), or
+      #   (b) build amd64 only for the scan, then rebuild multi-arch for push.
+      # Current setup: single-platform amd64 only — load: true works correctly.
       # ──────────────────────────────────────────────────────
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -333,7 +356,7 @@ jobs:
 
       # Pass A — OS packages: warn only (Canonical/vendor's responsibility)
       - name: Trivy — image scan OS packages (CRITICAL → warn only)
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb5 # v0.35.0
         with:
           scan-type: image
           image-ref: ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
@@ -345,7 +368,7 @@ jobs:
       # Pass B — Library (JAR) CRITICALs: FAIL the build
       # These are YOUR dependencies in pom.xml. Fix = bump version.
       - name: Trivy — image scan JAR/library (CRITICAL → fail)
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb5 # v0.35.0
         with:
           scan-type: image
           image-ref: ${{ env.IMAGE_NAME }}:${{ steps.versioning.outputs.image_tag }}
@@ -356,7 +379,7 @@ jobs:
 
       # Pass B (cont.) — Library HIGH/MEDIUM: warn only
       - name: Trivy — image scan JAR/library (HIGH/MEDIUM → warn only)
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb5 # v0.35.0
         if: always()
         with:
           scan-type: image
@@ -368,7 +391,7 @@ jobs:
 
       # Pass C — Full report for audit trail (all vuln-types, all severities)
       - name: Trivy — image scan full report (audit artifact)
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@18f2510ee396bbf400402947b394f2dd8c87dbb5 # v0.35.0
         if: always()
         with:
           scan-type: image
@@ -388,6 +411,15 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 11 — Push to Docker Hub
+      #
+      # FIX #1 — WHY bare $IMAGE_TAG and NOT ${{ env.IMAGE_TAG }}:
+      # IMAGE_TAG is a runtime-computed value written to $GITHUB_ENV by the
+      # versioning step. The ${{ env.IMAGE_TAG }} expression context is parsed
+      # BEFORE any step runs — it would always resolve to empty string here.
+      # Bare $IMAGE_TAG reads from the bash environment (populated from
+      # $GITHUB_ENV at step start) and correctly gets the versioning output.
+      # Static env vars like IMAGE_NAME (set in the top-level env: block) are
+      # safe to use with ${{ env.* }} because they are known at parse time.
       # ──────────────────────────────────────────────────────
       - name: Docker Hub — push image
         run: |
@@ -396,6 +428,7 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 12 — Push to GitHub Container Registry (GHCR)
+      # (Same $IMAGE_TAG rationale as Stage 11 — see comment above.)
       # ──────────────────────────────────────────────────────
       - name: GHCR — push image
         run: |
@@ -404,6 +437,7 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 13 — Push to Nexus Docker Registry
+      # (Same $IMAGE_TAG rationale as Stage 11 — see comment above.)
       # ──────────────────────────────────────────────────────
       - name: Nexus — push image (path-based routing)
         run: |
@@ -429,6 +463,15 @@ jobs:
       # (success() is the implicit default when no status function is given).
       # This is intentional: the CD repo must only be updated when the full
       # pipeline passes — not on PR builds or partial failures.
+      #
+      # FIX #7 — Clone URL uses x-access-token pattern instead of hardcoded
+      # username. The previous form `ibtisam-iq:${GIT_TOKEN}` bound the clone
+      # to a specific account — if the PAT belongs to a different user, the
+      # repo is transferred to an org, or the username changes, the clone
+      # fails with 403. The x-access-token pattern is the standard GitHub
+      # HTTPS PAT auth form: username is literally "x-access-token" and the
+      # PAT is the password. It works for any PAT regardless of which account
+      # issued it, and is the pattern recommended in GitHub's own docs.
       # ──────────────────────────────────────────────────────
       - name: Update CD repo — GitOps image tag handoff
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -437,7 +480,7 @@ jobs:
         run: |
           git config --global user.email "github-actions@ibtisam-iq.com"
           git config --global user.name  "GitHub Actions CI"
-          git clone https://ibtisam-iq:${GIT_TOKEN}@github.com/ibtisam-iq/platform-engineering-systems.git cd-repo
+          git clone https://x-access-token:${GIT_TOKEN}@github.com/ibtisam-iq/platform-engineering-systems.git cd-repo
           cd cd-repo
           mkdir -p systems/java-monolith
           echo "IMAGE_TAG=${IMAGE_TAG}" > systems/java-monolith/image.env
@@ -447,6 +490,7 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # Cleanup — remove local Docker images
+      # (Same $IMAGE_TAG rationale as Stage 11 — see comment above.)
       # ──────────────────────────────────────────────────────
       - name: Cleanup — remove local Docker images
         if: always()
