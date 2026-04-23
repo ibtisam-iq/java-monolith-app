@@ -56,26 +56,19 @@ pipeline {
 
     // ── Environment variables available to every stage
     environment {
-        // ── App metadata (sourced from pom.xml values)
+        // ── App metadata
         APP_NAME       = 'java-monolith'
-
-        // ── APP_VERSION DRIFT WARNING ──────────────────────────────────────
-        // This value is hardcoded here and WILL drift if pom.xml version
-        // is ever bumped (e.g. 0.0.1-SNAPSHOT → 1.0.0-RELEASE).
-        // The GitHub Actions ci.yml reads this dynamically via:
+        // APP_VERSION is intentionally NOT defined here.
+        // It is computed dynamically in the Versioning stage via:
         //   mvn help:evaluate -Dexpression=project.version -q -DforceStdout
-        // If this value drifts from pom.xml, the Nexus artifact path will
-        // be correct but IMAGE_TAG will carry the wrong version prefix.
-        // TODO: Move APP_VERSION into the Versioning stage and compute it
-        //       dynamically from pom.xml the same way ci.yml does.
-        // ──────────────────────────────────────────────────────────────────
-        APP_VERSION    = '0.0.1-SNAPSHOT'
+        // This ensures IMAGE_TAG always reflects the actual pom.xml version
+        // and never drifts when the version is bumped (e.g. SNAPSHOT → RELEASE).
         GROUP_ID       = 'com.ibtisamiq'
 
         // ── Docker Hub image
         DOCKER_USER    = 'mibtisam'
         IMAGE_NAME     = "${DOCKER_USER}/${APP_NAME}"
-        // IMAGE_TAG is set dynamically in the "Versioning" stage below
+        // IMAGE_TAG is set dynamically in the Versioning stage below
 
         // ── GitHub Container Registry (ghcr.io)
         GHCR_USER      = 'ibtisam-iq'
@@ -93,7 +86,7 @@ pipeline {
         // Docker Bearer Token Realm must be active in Security → Realms.
         //
         // NEXUS_URL purpose: Nexus web UI link only — used in the success {} echo
-        // below so the console output shows a clickable URL to the Nexus UI.
+        // so the console output shows a clickable URL to the Nexus UI.
         // It is NOT used for docker login or docker push (those use NEXUS_DOCKER,
         // which is the bare hostname without https:// as required by the Docker CLI).
         NEXUS_URL         = 'https://nexus.ibtisam-iq.com'
@@ -119,7 +112,12 @@ pipeline {
 
     options {
         buildDiscarder(logRotator(numToKeepStr: '10'))
-        timeout(time: 45, unit: 'MINUTES')
+        // 60 minutes — increased from 45 to accommodate cold starts on the
+        // self-hosted server (jenkins.ibtisam-iq.com) where the Trivy DB has
+        // not yet been cached and the Maven local repo may be empty.
+        // With --cache-dir /var/cache/trivy (see Stage 2 and Stage 9), repeated
+        // builds will be significantly faster and well within this limit.
+        timeout(time: 60, unit: 'MINUTES')
         disableConcurrentBuilds()
         timestamps()
         ansiColor('xterm')
@@ -130,43 +128,34 @@ pipeline {
         // ────────────────────────────────────────────────
         // STAGE 1 — Checkout
         //
-        // PREVIOUS (when this file lived in ibtisam-iq/devsecops-pipelines):
-        //   Cloned the devsecops-pipelines repo with recursive submodules
-        //   so that pipelines/java-monolith/app/ was populated with the
-        //   java-monolith-app source code via Git submodule.
+        // Uses `checkout scm` — Jenkins injects the exact SCM object
+        // (branch, commit SHA, credentials) from the pipeline job
+        // configuration that triggered this build.
         //
+        // Why checkout scm instead of manual checkout([$class: 'GitSCM', ...]):
+        //   - No hardcoded branch name (*/main) — follows whatever branch
+        //     triggered the build, making branch-based when{} guards work.
+        //   - Guarantees GIT_COMMIT and GIT_BRANCH env vars match the
+        //     exact triggering commit — critical for the OCI revision label
+        //     in Stage 8 (Docker Build) and the image tag in Stage 3.
+        //   - Avoids a redundant second full clone of the repo (Jenkins
+        //     already did a lightweight checkout to read this Jenkinsfile).
+        //
+        // PREVIOUS manual form (kept for reference):
         //   checkout([
         //       $class: 'GitSCM',
         //       branches: [[name: '*/main']],
-        //       extensions: [
-        //           [$class: 'SubmoduleOption',
-        //               disableSubmodules: false,
-        //               parentCredentials: true,
-        //               recursiveSubmodules: true,
-        //               trackingSubmodules: false]
-        //       ],
+        //       extensions: [],
         //       userRemoteConfigs: [[
-        //           url: 'https://github.com/ibtisam-iq/devsecops-pipelines.git',
+        //           url: 'https://github.com/ibtisam-iq/java-monolith-app.git',
         //           credentialsId: 'github-creds'
         //       ]]
         //   ])
-        //
-        // CURRENT (now that this file lives in ibtisam-iq/java-monolith-app):
-        //   Jenkins checks out this repo directly. No submodule setup needed.
-        //   The source code is already at the workspace root.
         // ────────────────────────────────────────────────
         stage('Checkout') {
             steps {
                 echo '📥 Checking out source...'
-                checkout([
-                    $class: 'GitSCM',
-                    branches: [[name: '*/main']],
-                    extensions: [],
-                    userRemoteConfigs: [[
-                        url: 'https://github.com/ibtisam-iq/java-monolith-app.git',
-                        credentialsId: 'github-creds'
-                    ]]
-                ])
+                checkout scm
             }
         }
 
@@ -180,7 +169,17 @@ pipeline {
         //
         // Runs BEFORE build — fail-fast on secrets or
         // critical dependency CVEs before wasting build time.
-        // --scanners secret,vuln,config covers all three.
+        //
+        // TRIVY SCANNER NAME:
+        //   --scanners secret,vuln,misconfig requires Trivy ≥ v0.38.0
+        //   (released 2023-03). In older versions the flag was `config`.
+        //   Verify your installed version: trivy --version
+        //   If < 0.38.0, upgrade Trivy or replace `misconfig` with `config`.
+        //
+        // TRIVY CACHE:
+        //   --cache-dir /var/cache/trivy persists the vulnerability DB
+        //   across builds on this self-hosted server, avoiding a ~50 MB
+        //   download on every run. Create once: mkdir -p /var/cache/trivy
         //
         // TWO-PASS STRATEGY:
         //   Pass 1 — CRITICAL only, --exit-code 1 (NO || true)
@@ -201,6 +200,7 @@ pipeline {
                     echo '🔎 Running Trivy filesystem scan on source tree...'
                     sh """
                         trivy fs \\
+                            --cache-dir /var/cache/trivy \\
                             --scanners secret,vuln,misconfig \\
                             --exit-code 1 \\
                             --severity CRITICAL \\
@@ -210,6 +210,7 @@ pipeline {
                             .
 
                         trivy fs \\
+                            --cache-dir /var/cache/trivy \\
                             --scanners secret,vuln,misconfig \\
                             --exit-code 0 \\
                             --severity HIGH,MEDIUM \\
@@ -227,13 +228,21 @@ pipeline {
         // Build a unique, traceable image tag:
         //   <pom-version>-<short-git-sha>-<build-number>
         // e.g.  0.0.1-SNAPSHOT-ab3f12c-42
+        //
+        // APP_VERSION is read dynamically from pom.xml via mvn help:evaluate
+        // so the tag always reflects the real version — no hardcoding that
+        // can drift when the pom.xml version is bumped.
         // ────────────────────────────────────────────────
         stage('Versioning') {
             steps {
                 dir(APP_DIR) {
                     script {
-                        def shortSha = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
-                        env.IMAGE_TAG = "${APP_VERSION}-${shortSha}-${BUILD_NUMBER}"
+                        def appVersion = sh(
+                            script: 'mvn help:evaluate -Dexpression=project.version -q -DforceStdout',
+                            returnStdout: true
+                        ).trim()
+                        def shortSha   = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+                        env.IMAGE_TAG  = "${appVersion}-${shortSha}-${BUILD_NUMBER}"
                         echo "🏷️  Image tag: ${IMAGE_TAG}"
                     }
                 }
@@ -331,6 +340,9 @@ pipeline {
         //   - GHCR       : ghcr.io/ibtisam-iq/java-monolith:<tag>
         //   - ECR        : <account>.dkr.ecr.<region>.amazonaws.com/java-monolith:<tag>
         // Building once and tagging avoids rebuilding per registry.
+        //
+        // GIT_COMMIT is guaranteed to be the triggering commit SHA
+        // because Stage 1 now uses `checkout scm`.
         // ────────────────────────────────────────────────
         stage('Docker Build') {
             steps {
@@ -370,6 +382,7 @@ pipeline {
         //   Pass 2 — HIGH,MEDIUM,LOW, --exit-code 0
         //            → advisory only, printed as a table to console.
         //
+        // --cache-dir /var/cache/trivy — same DB cache as Stage 2.
         // Results archived as trivy-image-report.json.
         // ────────────────────────────────────────────────
         stage('Trivy Image Scan') {
@@ -377,6 +390,7 @@ pipeline {
                 echo "🛡️  Scanning image with Trivy: ${IMAGE_NAME}:${IMAGE_TAG}"
                 sh """
                     trivy image \\
+                        --cache-dir /var/cache/trivy \\
                         --exit-code 1 \\
                         --severity CRITICAL \\
                         --no-progress \\
@@ -385,6 +399,7 @@ pipeline {
                         ${IMAGE_NAME}:${IMAGE_TAG}
 
                     trivy image \\
+                        --cache-dir /var/cache/trivy \\
                         --exit-code 0 \\
                         --severity HIGH,MEDIUM,LOW \\
                         --no-progress \\
@@ -396,201 +411,235 @@ pipeline {
         }
 
         // ────────────────────────────────────────────────
-        // STAGE 10 — Push to Docker Hub
-        // Credential ID: docker-creds (Username with Password)
-        // Pushes both versioned tag and :latest.
+        // STAGE 10–14 — Publish (main branch only)
+        //
+        // All registry push stages and the CD repo update are
+        // grouped inside this parent stage and gated with:
+        //   when { branch 'main' }
+        //
+        // This prevents feature/* and develop branches from:
+        //   - Pushing SNAPSHOT images to Docker Hub, GHCR, Nexus
+        //   - Polluting the CD repo with non-production tags
+        //
+        // The when{} condition is evaluated before any nested stage
+        // runs, so all five sub-stages are skipped together if the
+        // triggering branch is not main.
         // ────────────────────────────────────────────────
-        stage('Push to Docker Hub') {
-            steps {
-                echo "🚀 Pushing image to Docker Hub: ${IMAGE_NAME}"
-                withCredentials([usernamePassword(
-                    credentialsId: 'docker-creds',
-                    usernameVariable: 'DOCKER_USERNAME',
-                    passwordVariable: 'DOCKER_PASSWORD'
-                )]) {
-                    sh """
-                        echo "\${DOCKER_PASSWORD}" | docker login -u "\${DOCKER_USERNAME}" --password-stdin
-                        docker push ${IMAGE_NAME}:${IMAGE_TAG}
-                        docker push ${IMAGE_NAME}:latest
-                        docker logout
-                    """
-                }
+        stage('Publish') {
+            when {
+                branch 'main'
             }
-        }
+            stages {
 
-        // ────────────────────────────────────────────────
-        // STAGE 11 — Push to GitHub Container Registry (GHCR)
-        // ghcr.io/ibtisam-iq/java-monolith:<tag>
-        //
-        // Credential setup in Jenkins:
-        //   Kind:     Username with password
-        //   Username: ibtisam-iq
-        //   Password: GitHub PAT with scopes: write:packages, read:packages
-        //   ID:       ghcr-creds
-        //
-        // NOTE: You can reuse github-creds if your existing PAT
-        // already has write:packages scope. If so, replace
-        // 'ghcr-creds' with 'github-creds' below.
-        // ────────────────────────────────────────────────
-        stage('Push to GHCR') {
-            steps {
-                echo "🐙 Pushing image to GitHub Container Registry: ${GHCR_IMAGE}"
-                withCredentials([usernamePassword(
-                    credentialsId: 'ghcr-creds',
-                    usernameVariable: 'GHCR_USERNAME',
-                    passwordVariable: 'GHCR_TOKEN'
-                )]) {
-                    sh """
-                        echo "\${GHCR_TOKEN}" | docker login ghcr.io -u "\${GHCR_USERNAME}" --password-stdin
-                        docker push ${GHCR_IMAGE}:${IMAGE_TAG}
-                        docker push ${GHCR_IMAGE}:latest
-                        docker logout ghcr.io
-                    """
+                // ────────────────────────────────────────
+                // STAGE 10 — Push to Docker Hub
+                // Credential ID: docker-creds (Username with Password)
+                // Pushes both versioned tag and :latest.
+                // ────────────────────────────────────────
+                stage('Push to Docker Hub') {
+                    steps {
+                        echo "🚀 Pushing image to Docker Hub: ${IMAGE_NAME}"
+                        withCredentials([usernamePassword(
+                            credentialsId: 'docker-creds',
+                            usernameVariable: 'DOCKER_USERNAME',
+                            passwordVariable: 'DOCKER_PASSWORD'
+                        )]) {
+                            sh """
+                                echo "\${DOCKER_PASSWORD}" | docker login -u "\${DOCKER_USERNAME}" --password-stdin
+                                docker push ${IMAGE_NAME}:${IMAGE_TAG}
+                                docker push ${IMAGE_NAME}:latest
+                                docker logout
+                            """
+                        }
+                    }
                 }
-            }
-        }
 
-        // ────────────────────────────────────────────────
-        // STAGE 12 — Push to Nexus Docker Registry
-        // Uses path-based routing — no dedicated Docker port needed.
-        // Image URL format: nexus.ibtisam-iq.com/docker-hosted/java-monolith:<tag>
-        //
-        // Pre-requisites in Nexus UI:
-        //   1. Create hosted Docker repo with "Path based routing" selected
-        //   2. Security → Realms → enable "Docker Bearer Token Realm"
-        //
-        // Credential ID: nexus-creds (Username with Password)
-        // ────────────────────────────────────────────────
-        stage('Push to Nexus Registry') {
-            steps {
-                echo "📤 Pushing image to Nexus Docker registry (path-based)..."
-                withCredentials([usernamePassword(
-                    credentialsId: 'nexus-creds',
-                    usernameVariable: 'NEXUS_USER',
-                    passwordVariable: 'NEXUS_PASS'
-                )]) {
-                    sh """
-                        echo "\${NEXUS_PASS}" | docker login ${NEXUS_DOCKER} -u "\${NEXUS_USER}" --password-stdin
-                        docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:${IMAGE_TAG}
-                        docker tag ${IMAGE_NAME}:latest       ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:latest
-                        docker push ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:${IMAGE_TAG}
-                        docker push ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:latest
-                        docker logout ${NEXUS_DOCKER}
-                    """
+                // ────────────────────────────────────────
+                // STAGE 11 — Push to GitHub Container Registry (GHCR)
+                // ghcr.io/ibtisam-iq/java-monolith:<tag>
+                //
+                // Credential setup in Jenkins:
+                //   Kind:     Username with password
+                //   Username: ibtisam-iq
+                //   Password: GitHub PAT with scopes: write:packages, read:packages
+                //   ID:       ghcr-creds
+                //
+                // NOTE: You can reuse github-creds if your existing PAT
+                // already has write:packages scope. If so, replace
+                // 'ghcr-creds' with 'github-creds' below.
+                // ────────────────────────────────────────
+                stage('Push to GHCR') {
+                    steps {
+                        echo "🐙 Pushing image to GitHub Container Registry: ${GHCR_IMAGE}"
+                        withCredentials([usernamePassword(
+                            credentialsId: 'ghcr-creds',
+                            usernameVariable: 'GHCR_USERNAME',
+                            passwordVariable: 'GHCR_TOKEN'
+                        )]) {
+                            sh """
+                                echo "\${GHCR_TOKEN}" | docker login ghcr.io -u "\${GHCR_USERNAME}" --password-stdin
+                                docker push ${GHCR_IMAGE}:${IMAGE_TAG}
+                                docker push ${GHCR_IMAGE}:latest
+                                docker logout ghcr.io
+                            """
+                        }
+                    }
                 }
-            }
-        }
 
-        // ────────────────────────────────────────────────
-        // STAGE 13 — Push to AWS ECR  [COMMENTED OUT]
-        // Uncomment and configure once AWS credentials and
-        // ECR repository are provisioned.
-        //
-        // Pre-requisites:
-        //   1. Create ECR repo:
-        //        aws ecr create-repository --repository-name java-monolith --region us-east-1
-        //
-        //   2. Add AWS credentials to Jenkins:
-        //        Kind:     AWS Credentials (requires CloudBees AWS Credentials plugin)
-        //        ID:       aws-creds
-        //        Access Key ID + Secret Access Key for an IAM user/role with
-        //        AmazonEC2ContainerRegistryPowerUser policy attached.
-        //
-        //   3. Set the four ECR variables in environment {} above:
-        //        AWS_REGION, AWS_ACCOUNT_ID, ECR_REGISTRY, ECR_IMAGE
-        //
-        //   4. Uncomment the docker tag lines in the Docker Build stage above.
-        //
-        //   5. Uncomment this entire stage.
-        // ────────────────────────────────────────────────
-        // stage('Push to AWS ECR') {
-        //     steps {
-        //         echo "☁️  Pushing image to AWS ECR: ${ECR_IMAGE}"
-        //         withCredentials([[
-        //             $class:            'AmazonWebServicesCredentialsBinding',
-        //             credentialsId:     'aws-creds',
-        //             accessKeyVariable: 'AWS_ACCESS_KEY_ID',
-        //             secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
-        //         ]]) {
-        //             sh """
-        //                 aws ecr get-login-password --region ${AWS_REGION} \
-        //                     | docker login --username AWS --password-stdin ${ECR_REGISTRY}
-        //
-        //                 docker push ${ECR_IMAGE}:${IMAGE_TAG}
-        //                 docker push ${ECR_IMAGE}:latest
-        //
-        //                 docker logout ${ECR_REGISTRY}
-        //             """
-        //         }
-        //     }
-        // }
-
-        // ────────────────────────────────────────────────
-        // STAGE 14 — Update Image Tag in CD Repo
-        // CI → CD Handoff: commits the new image tag into
-        // platform-engineering-systems so ArgoCD detects
-        // the change and triggers deployment.
-        //
-        // SECURITY NOTE — git credentials handling:
-        //   The token is embedded in the clone URL as required by
-        //   the git CLI. To prevent it from persisting in .git/config
-        //   (where it would be visible via `git remote -v`), we
-        //   immediately unset the remote URL after cloning using
-        //   `git remote set-url origin ""`. This replaces the
-        //   token-bearing URL with an empty string before any
-        //   subsequent git operation reads or prints the config.
-        //   cleanWs() at the end of post { always } removes the
-        //   entire cd-repo directory, providing a second line of defence.
-        //
-        // GIT IDENTITY — --local vs --global:
-        //   git config --local is used instead of --global because
-        //   --global writes to ~/.gitconfig on the Jenkins agent OS,
-        //   which is shared across ALL pipelines running on the same
-        //   agent. --local writes only to cd-repo/.git/config and is
-        //   scoped entirely to this repository clone, preventing the
-        //   CI identity from bleeding into other pipeline builds.
-        // ────────────────────────────────────────────────
-        stage('Update CD Repo') {
-            steps {
-                echo '🔄 Updating image tag in CD repo (platform-engineering-systems)...'
-                withCredentials([usernamePassword(
-                    credentialsId: 'github-creds',
-                    usernameVariable: 'GIT_USER',
-                    passwordVariable: 'GIT_TOKEN'
-                )]) {
-                    sh """
-                        rm -rf cd-repo
-                        git clone https://\${GIT_USER}:\${GIT_TOKEN}@github.com/ibtisam-iq/platform-engineering-systems.git cd-repo
-
-                        cd cd-repo
-
-                        # Remove the token-bearing URL from .git/config immediately after
-                        # cloning so it cannot leak via `git remote -v` or log output.
-                        git remote set-url origin ""
-
-                        # Use --local so the CI identity is scoped to this repo only
-                        # and does not bleed into other pipelines on the same agent.
-                        git config --local user.email "jenkins@ibtisam-iq.com"
-                        git config --local user.name  "Jenkins CI"
-
-                        # Once K8s/Helm manifests exist, replace the echo below with:
-                        # sed -i "s|image: ibtisam-iq/java-monolith:.*|image: ibtisam-iq/java-monolith:${IMAGE_TAG}|g" \\
-                        #     deployments/java-monolith/deployment.yaml
-
-                        echo "IMAGE_TAG=${IMAGE_TAG}" > systems/java-monolith/image.env
-
-                        git add systems/java-monolith/image.env
-                        git commit -m "ci: update java-monolith image tag to ${IMAGE_TAG} [skip ci]" || echo "Nothing to commit"
-
-                        # Push using the token directly via the credential env vars
-                        # (remote URL was cleared above — re-supply inline for push only).
-                        git push https://\${GIT_USER}:\${GIT_TOKEN}@github.com/ibtisam-iq/platform-engineering-systems.git main
-                    """
+                // ────────────────────────────────────────
+                // STAGE 12 — Push to Nexus Docker Registry
+                // Uses path-based routing — no dedicated Docker port needed.
+                // Image URL: nexus.ibtisam-iq.com/docker-hosted/java-monolith:<tag>
+                //
+                // Pre-requisites in Nexus UI:
+                //   1. Create hosted Docker repo with "Path based routing" selected
+                //   2. Security → Realms → enable "Docker Bearer Token Realm"
+                //
+                // Credential ID: nexus-creds (Username with Password)
+                // ────────────────────────────────────────
+                stage('Push to Nexus Registry') {
+                    steps {
+                        echo "📤 Pushing image to Nexus Docker registry (path-based)..."
+                        withCredentials([usernamePassword(
+                            credentialsId: 'nexus-creds',
+                            usernameVariable: 'NEXUS_USER',
+                            passwordVariable: 'NEXUS_PASS'
+                        )]) {
+                            sh """
+                                echo "\${NEXUS_PASS}" | docker login ${NEXUS_DOCKER} -u "\${NEXUS_USER}" --password-stdin
+                                docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:${IMAGE_TAG}
+                                docker tag ${IMAGE_NAME}:latest       ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:latest
+                                docker push ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:${IMAGE_TAG}
+                                docker push ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:latest
+                                docker logout ${NEXUS_DOCKER}
+                            """
+                        }
+                    }
                 }
-            }
-        }
 
-    }
+                // ────────────────────────────────────────
+                // STAGE 13 — Push to AWS ECR  [COMMENTED OUT]
+                // Uncomment and configure once AWS credentials and
+                // ECR repository are provisioned.
+                //
+                // Pre-requisites:
+                //   1. Create ECR repo:
+                //        aws ecr create-repository --repository-name java-monolith --region us-east-1
+                //
+                //   2. Add AWS credentials to Jenkins:
+                //        Kind:     AWS Credentials (requires CloudBees AWS Credentials plugin)
+                //        ID:       aws-creds
+                //        Access Key ID + Secret Access Key for an IAM user/role with
+                //        AmazonEC2ContainerRegistryPowerUser policy attached.
+                //
+                //   3. Set the four ECR variables in environment {} above:
+                //        AWS_REGION, AWS_ACCOUNT_ID, ECR_REGISTRY, ECR_IMAGE
+                //
+                //   4. Uncomment the docker tag lines in the Docker Build stage above.
+                //
+                //   5. Uncomment this entire stage.
+                // ────────────────────────────────────────
+                // stage('Push to AWS ECR') {
+                //     steps {
+                //         echo "☁️  Pushing image to AWS ECR: ${ECR_IMAGE}"
+                //         withCredentials([[
+                //             $class:            'AmazonWebServicesCredentialsBinding',
+                //             credentialsId:     'aws-creds',
+                //             accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                //             secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                //         ]]) {
+                //             sh """
+                //                 aws ecr get-login-password --region ${AWS_REGION} \
+                //                     | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+                //
+                //                 docker push ${ECR_IMAGE}:${IMAGE_TAG}
+                //                 docker push ${ECR_IMAGE}:latest
+                //
+                //                 docker logout ${ECR_REGISTRY}
+                //             """
+                //         }
+                //     }
+                // }
+
+                // ────────────────────────────────────────
+                // STAGE 14 — Update Image Tag in CD Repo
+                // CI → CD Handoff: commits the new image tag into
+                // platform-engineering-systems so ArgoCD detects
+                // the change and triggers deployment.
+                //
+                // CREDENTIAL SECURITY:
+                //   The token is needed for both clone and push. To keep
+                //   it out of the remote URL (and therefore out of
+                //   .git/config and console log output), we:
+                //     1. Clone with the token in the URL (unavoidable for git CLI)
+                //     2. Immediately clear it: git remote set-url origin ""
+                //     3. Use Git credential helper for push — credentials
+                //        are passed via stdin, never embedded in any URL.
+                //        Format: git -c credential.helper='!f() {...}; f' push origin main
+                //   This means the token NEVER appears in the URL in either
+                //   .git/config or the Jenkins console log.
+                //
+                // GIT IDENTITY:
+                //   git config --local scopes the CI identity to this
+                //   repo's .git/config only — does not bleed into other
+                //   pipelines running on the same Jenkins agent.
+                //
+                // DIRECTORY SAFETY:
+                //   mkdir -p systems/java-monolith ensures the target
+                //   directory exists before writing image.env. Without
+                //   this, the echo redirect fails on first run or if
+                //   the directory was ever deleted from the CD repo.
+                // ────────────────────────────────────────
+                stage('Update CD Repo') {
+                    steps {
+                        echo '🔄 Updating image tag in CD repo (platform-engineering-systems)...'
+                        withCredentials([usernamePassword(
+                            credentialsId: 'github-creds',
+                            usernameVariable: 'GIT_USER',
+                            passwordVariable: 'GIT_TOKEN'
+                        )]) {
+                            sh """
+                                rm -rf cd-repo
+                                git clone https://\${GIT_USER}:\${GIT_TOKEN}@github.com/ibtisam-iq/platform-engineering-systems.git cd-repo
+
+                                cd cd-repo
+
+                                # Clear the token-bearing URL from .git/config immediately
+                                # after cloning — prevents leaking via `git remote -v`.
+                                git remote set-url origin ""
+
+                                # Scope CI identity to this repo only (not --global).
+                                git config --local user.email "jenkins@ibtisam-iq.com"
+                                git config --local user.name  "Jenkins CI"
+
+                                # Ensure the target directory exists before writing.
+                                # Required on first run or if systems/java-monolith/
+                                # was ever deleted from the CD repo.
+                                mkdir -p systems/java-monolith
+
+                                # Once K8s/Helm manifests exist, replace the echo below with:
+                                # sed -i "s|image: ibtisam-iq/java-monolith:.*|image: ibtisam-iq/java-monolith:${IMAGE_TAG}|g" \\
+                                #     deployments/java-monolith/deployment.yaml
+
+                                echo "IMAGE_TAG=${IMAGE_TAG}" > systems/java-monolith/image.env
+
+                                git add systems/java-monolith/image.env
+                                git commit -m "ci: update java-monolith image tag to ${IMAGE_TAG} [skip ci]" || echo "Nothing to commit"
+
+                                # Push using Git credential helper — credentials are passed
+                                # via stdin, never embedded in the remote URL or visible
+                                # in the console log.
+                                git -c credential.helper='!f() { echo "username=\${GIT_USER}"; echo "password=\${GIT_TOKEN}"; }; f' \\
+                                    push origin main
+                            """
+                        }
+                    }
+                }
+
+            } // end stages (Publish)
+        } // end stage('Publish')
+
+    } // end stages
 
     // ────────────────────────────────────────────────────
     // POST — Publishers, Cleanup & Notifications
@@ -610,17 +659,11 @@ pipeline {
     //      docker rmi block entirely rather than running malformed
     //      commands like `docker rmi java-monolith:` with no tag.
     //   3. cleanWs() runs LAST — removes the entire workspace
-    //      including any leftover cd-repo directory. The separate
-    //      `rm -rf cd-repo` that previously appeared here was
-    //      redundant: cleanWs() already deletes everything under
-    //      the workspace root, including cd-repo.
+    //      including any leftover cd-repo directory.
     // ────────────────────────────────────────────────────
     post {
         always {
             // ── 1. Test results (publishers first, before workspace is wiped)
-            //
-            // PREVIOUS path (devsecops-pipelines repo with submodule):
-            //   junit testResults: "pipelines/java-monolith/app/target/surefire-reports/*.xml"
             //
             // CURRENT path (java-monolith-app repo root, APP_DIR = '.'):
             junit testResults: "${APP_DIR}/target/surefire-reports/*.xml",
@@ -628,12 +671,7 @@ pipeline {
 
             // ── Code coverage (Coverage Plugin — recordCoverage DSL)
             // Requires: "Coverage" plugin (not the old JaCoCo plugin).
-            // jacoco.exec is generated by JaCoCo prepare-agent bound in pom.xml.
-            //
-            // PREVIOUS path (devsecops-pipelines repo with submodule):
-            //   pattern: "pipelines/java-monolith/app/target/site/jacoco/jacoco.xml"
-            //
-            // CURRENT path (java-monolith-app repo root, APP_DIR = '.'):
+            // jacoco.xml is generated by JaCoCo report goal bound in pom.xml.
             recordCoverage(
                 tools: [[
                     parser: 'JACOCO',
@@ -646,20 +684,18 @@ pipeline {
             // Guarded with if (env.IMAGE_TAG) to prevent malformed
             // `docker rmi image:` commands when the pipeline fails
             // before Stage 3 (Versioning) and IMAGE_TAG was never set.
-            // Nexus image tag uses path-based format: host/repo-name/image:tag
-            // ECR lines stay commented until ECR_IMAGE is defined in environment {}
             script {
                 if (env.IMAGE_TAG) {
                     echo '🧹 Cleaning up local Docker images...'
                     sh """
                         docker rmi ${IMAGE_NAME}:${IMAGE_TAG}                                    || true
                         docker rmi ${IMAGE_NAME}:latest                                          || true
-                        docker rmi ${GHCR_IMAGE}:${IMAGE_TAG}                                    || true
-                        docker rmi ${GHCR_IMAGE}:latest                                          || true
+                        docker rmi ${GHCR_IMAGE}:${IMAGE_TAG}                                   || true
+                        docker rmi ${GHCR_IMAGE}:latest                                         || true
                         docker rmi ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:${IMAGE_TAG} || true
                         docker rmi ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:latest       || true
-                        # docker rmi \${ECR_IMAGE}:${IMAGE_TAG}                                  || true  (uncomment with ECR vars)
-                        # docker rmi \${ECR_IMAGE}:latest                                        || true  (uncomment with ECR vars)
+                        # docker rmi \${ECR_IMAGE}:${IMAGE_TAG}                                 || true  (uncomment with ECR vars)
+                        # docker rmi \${ECR_IMAGE}:latest                                       || true  (uncomment with ECR vars)
                     """
                 } else {
                     echo '⏭️  Skipping docker rmi — IMAGE_TAG not set (pipeline failed before Versioning stage).'
@@ -667,17 +703,16 @@ pipeline {
             }
 
             // ── 3. Workspace cleanup — runs last, after publishers and docker rmi.
-            // Removes the entire workspace including any leftover cd-repo directory.
-            // No separate `rm -rf cd-repo` needed — cleanWs() handles everything.
             cleanWs()
         }
         success {
             echo """
             ╔══════════════════════════════════════════════════════════╗
-            ║  ✅  PIPELINE SUCCEEDED                                  ║
-            ║  Image    : ${IMAGE_NAME}:${IMAGE_TAG}                   ║
-            ║  GHCR     : ${GHCR_IMAGE}:${IMAGE_TAG}                   ║
-            ║  Nexus    : ${NEXUS_URL}                                 ║
+            ║  ✅  PIPELINE SUCCEEDED
+            ╠══════════════════════════════════════════════════════════╣
+            ║  Image  : ${IMAGE_NAME}:${IMAGE_TAG}
+            ║  GHCR   : ${GHCR_IMAGE}:${IMAGE_TAG}
+            ║  Nexus  : ${NEXUS_URL}
             ╚══════════════════════════════════════════════════════════╝
             """
         }
