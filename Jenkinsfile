@@ -690,12 +690,12 @@ pipeline {
                     sh """
                         docker rmi ${IMAGE_NAME}:${IMAGE_TAG}                                    || true
                         docker rmi ${IMAGE_NAME}:latest                                          || true
-                        docker rmi ${GHCR_IMAGE}:${IMAGE_TAG}                                   || true
-                        docker rmi ${GHCR_IMAGE}:latest                                         || true
+                        docker rmi ${GHCR_IMAGE}:${IMAGE_TAG}                                    || true
+                        docker rmi ${GHCR_IMAGE}:latest                                          || true
                         docker rmi ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:${IMAGE_TAG} || true
                         docker rmi ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:latest       || true
-                        # docker rmi \${ECR_IMAGE}:${IMAGE_TAG}                                 || true  (uncomment with ECR vars)
-                        # docker rmi \${ECR_IMAGE}:latest                                       || true  (uncomment with ECR vars)
+                        # docker rmi \${ECR_IMAGE}:${IMAGE_TAG}                                  || true  (uncomment with ECR vars)
+                        # docker rmi \${ECR_IMAGE}:latest                                        || true  (uncomment with ECR vars)
                     """
                 } else {
                     echo '⏭️  Skipping docker rmi — IMAGE_TAG not set (pipeline failed before Versioning stage).'
