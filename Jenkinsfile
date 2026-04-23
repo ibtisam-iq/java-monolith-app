@@ -18,8 +18,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 //
 // ── MIGRATION NOTE ────────────────────────────────────────────────────────────
-// This Jenkinsfile was originally authored inside a separate
-// pipeline repository:
+// This Jenkinsfile was originally authored inside a separate pipeline repository:
 //
 //   Repo:        ibtisam-iq/devsecops-pipelines
 //   Script Path: pipelines/java-monolith/jenkins/Jenkinsfile
@@ -114,13 +113,25 @@ pipeline {
     }
 
     options {
-        buildDiscarder(logRotator(numToKeepStr: '10'))
+        // numToKeepStr: keep last 10 build logs.
+        // artifactNumToKeepStr: keep artifacts (Trivy JSON reports) for only
+        // the last 5 builds. Without this, archiveArtifacts accumulates
+        // trivy-fs-report.json and trivy-image-report.json from every build
+        // indefinitely on the Jenkins master disk.
+        buildDiscarder(logRotator(numToKeepStr: '10', artifactNumToKeepStr: '5'))
+
         // 60 minutes — accommodates cold starts on the self-hosted server
         // (jenkins.ibtisam-iq.com) where the Trivy DB may not yet be cached
         // and the Maven local repo may be empty. With --cache-dir /var/cache/trivy,
         // warm builds complete well within this limit.
         timeout(time: 60, unit: 'MINUTES')
-        disableConcurrentBuilds()
+
+        // abortPrevious: true is explicit — without it, behavior is Jenkins
+        // Pipeline Plugin version-dependent: older versions queue the waiting
+        // build, newer versions (Pipeline: Groovy 2794+ / LTS 2.387+) abort it.
+        // Being explicit locks the intended behavior across Jenkins LTS upgrades.
+        disableConcurrentBuilds(abortPrevious: true)
+
         timestamps()
         ansiColor('xterm')
     }
@@ -177,7 +188,7 @@ pipeline {
         //
         // TRIVY CACHE:
         //   --cache-dir /var/cache/trivy persists the vulnerability DB
-        //   across builds. Create once: mkdir -p /var/cache/trivy
+        //   across builds. Create once on the Jenkins host: mkdir -p /var/cache/trivy
         //
         // --skip-dirs .git — excluded to avoid:
         //   (a) False positives: Trivy's secret scanner finds base64-encoded
@@ -187,13 +198,18 @@ pipeline {
         //
         // TWO-PASS STRATEGY:
         //   Pass 1 — CRITICAL only, --exit-code 1 (NO || true)
-        //            → pipeline FAILS if any CRITICAL CVE found.
-        //              || true would silently swallow the failure —
-        //              never add it here.
+        //            → pipeline FAILS if any CRITICAL finding exists.
+        //              || true would silently swallow the failure — never add it.
         //   Pass 2 — HIGH,MEDIUM, --exit-code 0
         //            → advisory only, printed to console as a table.
         //
-        // Full CRITICAL report archived as trivy-fs-report.json.
+        // ARCHIVE PATH NOTE:
+        //   archiveArtifacts paths are always relative to the Jenkins workspace
+        //   root — NOT to the current dir() block. Using "${APP_DIR}/..." ensures
+        //   the path is correct whether APP_DIR is '.' or a subdirectory like
+        //   'src/app'. If the path were just 'trivy-fs-report.json' and APP_DIR
+        //   were a subdirectory, Jenkins would silently find nothing
+        //   (allowEmptyArchive: true hides the error).
         // ────────────────────────────────────────────────────────────────────
         stage('Trivy Filesystem Scan') {
             steps {
@@ -221,7 +237,9 @@ pipeline {
                             --format table \\
                             .
                     """
-                    archiveArtifacts artifacts: 'trivy-fs-report.json', allowEmptyArchive: true
+                    // APP_DIR prefix required — archiveArtifacts resolves from
+                    // workspace root, not from the active dir() block.
+                    archiveArtifacts artifacts: "${APP_DIR}/trivy-fs-report.json", allowEmptyArchive: true
                 }
             }
         }
@@ -238,6 +256,15 @@ pipeline {
         // POM hosted in Nexus — without withMaven, Maven cannot resolve
         // the parent and help:evaluate returns an empty string, producing
         // a malformed tag like "-ab3f12c-42".
+        //
+        // EMPTY VERSION GUARD:
+        //   If mvn help:evaluate returns a blank string (e.g. due to a
+        //   network failure resolving the parent POM, or a mis-configured
+        //   pom.xml), IMAGE_TAG would become "-ab3f12c-42" — a valid Docker
+        //   tag syntactically but meaningless and misleading. The error()
+        //   call below aborts the pipeline immediately with a clear message
+        //   rather than letting a malformed tag propagate through all 14 stages
+        //   and get pushed to registries and the CD repo.
         // ────────────────────────────────────────────────────────────────────
         stage('Versioning') {
             steps {
@@ -250,6 +277,17 @@ pipeline {
                                 returnStdout: true
                             ).trim()
                         }
+
+                        // Fail fast if Maven returned an empty version string.
+                        // Common causes: Nexus unreachable (parent POM not resolved),
+                        // malformed pom.xml, or Maven output containing unexpected
+                        // whitespace/newlines that trim() doesn't fully clean.
+                        if (!appVersion || appVersion.isEmpty()) {
+                            error("❌ mvn help:evaluate returned an empty version string. " +
+                                  "Check pom.xml <version> and Nexus connectivity. " +
+                                  "IMAGE_TAG cannot be built without a valid version.")
+                        }
+
                         def shortSha  = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
                         env.IMAGE_TAG = "${appVersion}-${shortSha}-${BUILD_NUMBER}"
                         echo "🏷️  Image tag: ${IMAGE_TAG}"
@@ -283,6 +321,19 @@ pipeline {
         // STAGE 5 — SonarQube Analysis
         // withSonarQubeEnv injects SONAR_HOST_URL and the
         // sonarqube-token automatically — no hardcoding.
+        //
+        // JACOCO PATH — ABSOLUTE:
+        //   -Dsonar.coverage.jacoco.xmlReportPaths uses ${WORKSPACE}/${APP_DIR}/...
+        //   rather than a relative path. SonarQube's scanner resolves this path
+        //   relative to the Maven module base directory (from pom.xml), NOT the
+        //   shell working directory. If APP_DIR is a subdirectory, the module
+        //   base dir and the shell working dir can differ, causing SonarQube to
+        //   silently drop coverage data. The absolute WORKSPACE-based path is
+        //   unambiguous in all cases.
+        //
+        //   When APP_DIR = '.', ${WORKSPACE}/${APP_DIR}/target/... resolves to
+        //   ${WORKSPACE}/./target/... which is identical to ${WORKSPACE}/target/...
+        //   — no functional difference, fully forward-compatible.
         // ────────────────────────────────────────────────────────────────────
         stage('SonarQube Analysis') {
             steps {
@@ -295,7 +346,7 @@ pipeline {
                                     -Dsonar.projectKey=IbtisamIQbankapp \\
                                     -Dsonar.projectName=IbtisamIQbankapp \\
                                     -Dsonar.java.binaries=target/classes \\
-                                    -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \\
+                                    -Dsonar.coverage.jacoco.xmlReportPaths=${WORKSPACE}/${APP_DIR}/target/site/jacoco/jacoco.xml \\
                                     -B --no-transfer-progress
                             """
                         }
@@ -325,6 +376,17 @@ pipeline {
         //   https://nexus.ibtisam-iq.com/repository/maven-snapshots/
         // The server IDs (maven-releases / maven-snapshots) in
         // settings.xml match the <distributionManagement> in pom.xml.
+        //
+        // ARCHITECTURAL NOTE — JAR vs Docker build dependency:
+        //   The JAR deployed here (Stage 7) is the same artifact built in
+        //   Stage 4. The Docker multi-stage build (Stage 8) re-runs Maven
+        //   internally inside the builder container. On a single agent with
+        //   a shared .m2 cache, the Docker build reuses local cache — fine.
+        //   On distributed/containerized agents with isolated Maven caches,
+        //   the Docker build would pull the freshly-deployed SNAPSHOT from
+        //   Nexus. This is correct behavior (Docker image = Nexus-verified
+        //   artifact) but creates a build-time dependency on Nexus. Keep
+        //   this in mind when moving to ephemeral build agents.
         // ────────────────────────────────────────────────────────────────────
         stage('Publish JAR to Nexus') {
             steps {
@@ -339,10 +401,11 @@ pipeline {
 
         // ────────────────────────────────────────────────────────────────────
         // STAGE 8 — Docker Build
-        // Builds the multi-stage image defined in the app's
-        // own Dockerfile (Stage1: maven:3.9-temurin-21-alpine,
-        // Stage2: eclipse-temurin:21-jre-jammy).
-        // Tags the image for ALL three registries in one build:
+        // Builds the multi-stage image defined in the app's own Dockerfile:
+        //   Stage 1 (builder): maven:3.9-temurin-21-alpine
+        //   Stage 2 (runtime): eclipse-temurin:21-jre-jammy
+        //
+        // Tags the image for ALL registries in one build pass:
         //   - Docker Hub : mibtisam/java-monolith:<tag>
         //   - GHCR       : ghcr.io/ibtisam-iq/java-monolith:<tag>
         //   - ECR        : <account>.dkr.ecr.<region>.amazonaws.com/java-monolith:<tag>
@@ -377,19 +440,21 @@ pipeline {
 
         // ────────────────────────────────────────────────────────────────────
         // STAGE 9 — Trivy Image Scan
-        // Scans the freshly built image for CVEs BEFORE
-        // pushing to any registry — fail-fast principle.
+        // Scans the freshly built image for CVEs BEFORE pushing to any
+        // registry — fail-fast principle.
         //
-        // Wrapped in dir(APP_DIR) for consistency with Stage 2
-        // so the JSON report lands in the same relative path
-        // regardless of whether APP_DIR changes in future.
+        // Wrapped in dir(APP_DIR) for consistency with Stage 2 so the JSON
+        // report lands in the same relative path regardless of whether
+        // APP_DIR changes in future.
         //
         // TWO-PASS STRATEGY (same rationale as Stage 2):
         //   Pass 1 — CRITICAL only, --exit-code 1 (NO || true)
         //   Pass 2 — HIGH,MEDIUM,LOW, --exit-code 0 (advisory)
         //
         // --cache-dir /var/cache/trivy — same DB cache as Stage 2.
-        // Results archived as trivy-image-report.json.
+        //
+        // ARCHIVE PATH NOTE: same as Stage 2 — APP_DIR prefix required
+        // because archiveArtifacts resolves from workspace root.
         // ────────────────────────────────────────────────────────────────────
         stage('Trivy Image Scan') {
             steps {
@@ -413,7 +478,9 @@ pipeline {
                             --format table \\
                             ${IMAGE_NAME}:${IMAGE_TAG}
                     """
-                    archiveArtifacts artifacts: 'trivy-image-report.json', allowEmptyArchive: true
+                    // APP_DIR prefix required — archiveArtifacts resolves from
+                    // workspace root, not from the active dir() block.
+                    archiveArtifacts artifacts: "${APP_DIR}/trivy-image-report.json", allowEmptyArchive: true
                 }
             }
         }
@@ -421,23 +488,42 @@ pipeline {
         // ────────────────────────────────────────────────────────────────────
         // STAGE 10–14 — Publish (main branch only)
         //
-        // Gated with an expression{} condition on GIT_BRANCH — NOT
-        // `when { branch 'main' }`. The branch{} directive requires a
-        // Multibranch Pipeline job (which injects BRANCH_NAME). On a
-        // standard Pipeline job (the most common type on self-hosted
-        // Jenkins), BRANCH_NAME is never set and branch{} would always
-        // evaluate to false — silently skipping every publish.
+        // WHY expression{} INSTEAD OF when { branch 'main' }:
+        //   The branch{} directive requires a Multibranch Pipeline job, which
+        //   injects the BRANCH_NAME variable. On a standard Pipeline job (the
+        //   most common type on self-hosted Jenkins), BRANCH_NAME is never set
+        //   and branch{} silently evaluates to false — skipping every publish
+        //   with no error message, on every build, forever.
         //
-        // GIT_BRANCH is always set by `checkout scm` on standard
-        // Pipeline jobs. It takes the form "origin/main" after a
-        // checkout, so the regex .*\/main matches that reliably.
-        // The bare == 'main' arm handles Multibranch Pipeline jobs
-        // where BRANCH_NAME is injected directly without the remote prefix.
+        // WHY env.GIT_BRANCH AND NOT BRANCH_NAME:
+        //   checkout scm always sets GIT_BRANCH on standard Pipeline jobs.
+        //   On standard jobs it takes the form "origin/main" (with remote prefix).
+        //   On Multibranch Pipeline jobs it is typically just "main".
+        //
+        // WHY THE NULL GUARD (env.GIT_BRANCH != null):
+        //   When a build is triggered via the Jenkins REST API
+        //   (POST /job/.../build) without SCM parameters, GIT_BRANCH may not
+        //   be populated — env.GIT_BRANCH is null in Groovy. Calling
+        //   null ==~ /regex/ throws java.lang.NullPointerException, crashing
+        //   the when{} evaluation with a cryptic error instead of a clean skip.
+        //   The null guard short-circuits before the regex is evaluated.
+        //
+        // WHY THE ANCHORED REGEX ^(origin\/)?main$:
+        //   The previous /.*\/main/ was too broad — it matched any branch
+        //   containing "/main" anywhere, e.g. feature/fix-main-bug or
+        //   hotfix/main-update. Those branches would have triggered image
+        //   pushes to all three registries and a CD repo commit, silently
+        //   overwriting :latest with a non-release build.
+        //   The anchored regex ^(origin\/)?main$ matches ONLY:
+        //     - "origin/main"  (standard Pipeline job, checkout scm form)
+        //     - "main"         (Multibranch Pipeline job form)
+        //   Nothing else passes.
         // ────────────────────────────────────────────────────────────────────
         stage('Publish') {
             when {
                 expression {
-                    env.GIT_BRANCH ==~ /.*\/main/ || env.GIT_BRANCH == 'main'
+                    env.GIT_BRANCH != null &&
+                    (env.GIT_BRANCH ==~ /^(origin\/)?main$/)
                 }
             }
             stages {
@@ -446,10 +532,10 @@ pipeline {
                 // STAGE 10 — Push to Docker Hub
                 //
                 // docker logout registry-1.docker.io — explicit registry
-                // argument required. Bare `docker logout` (no args) logs
-                // out of docker.io AND clears the entire
-                // ~/.docker/config.json on some Docker Engine versions,
-                // wiping credentials for all other registries on the agent.
+                // argument is required. Bare `docker logout` (no args) logs
+                // out of docker.io AND clears the entire ~/.docker/config.json
+                // on some Docker Engine versions, wiping credentials for all
+                // other registries (GHCR, Nexus, ECR) currently held on the agent.
                 // ────────────────────────────────────────────────────────────
                 stage('Push to Docker Hub') {
                     steps {
@@ -567,31 +653,71 @@ pipeline {
                 // ────────────────────────────────────────────────────────────
                 // STAGE 14 — Update Image Tag in CD Repo
                 // CI → CD Handoff: commits the new image tag into
-                // platform-engineering-systems so ArgoCD detects
-                // the change and triggers deployment.
+                // platform-engineering-systems so ArgoCD detects the change
+                // and triggers a rolling deployment.
                 //
-                // CREDENTIAL SECURITY:
-                //   1. Clone with token in URL (required by git CLI)
-                //   2. Immediately clear origin URL: git remote set-url origin ""
-                //      Prevents token leaking via `git remote -v`
-                //   3. Restore BARE HTTPS URL (no credentials) to origin
-                //      before pushing. This is required — the credential
-                //      helper needs a valid remote URL to push to.
-                //   4. Push via Git credential helper — credentials passed
-                //      via stdin, never embedded in any URL or log output.
+                // ── CREDENTIAL SECURITY FLOW ─────────────────────────────
+                //   Step 0: IMAGE_TAG guard — abort if empty (see below).
+                //   Step 1: Clone using token-in-URL (only way git CLI supports
+                //           auth for a one-shot HTTPS clone without SSH keys).
+                //   Step 2: IMMEDIATELY clear the token-bearing URL from
+                //           .git/config after clone — prevents token leaking
+                //           via `git remote -v` or accident debug output.
+                //   Step 3: Restore the BARE HTTPS URL (no credentials) as
+                //           the new origin. This is required — the credential
+                //           helper (Step 4) needs a valid, non-empty remote URL
+                //           to push to. An empty URL causes:
+                //             fatal: '' does not appear to be a git repository
+                //   Step 4: Push via git credential helper — credentials are
+                //           fed to git via stdin at push time only, never stored
+                //           in any file, never visible in git remote -v or logs.
                 //
-                // GROOVY INTERPOLATION NOTE (CRITICAL):
-                //   Inside """...""", Groovy interpolates ${VAR}. To pass
-                //   shell variables (like GIT_USER / GIT_TOKEN injected by
-                //   withCredentials), the $ must be escaped as \$ so Groovy
-                //   passes them through to the shell unexpanded:
-                //     echo "username=\${GIT_USER}"   → shell sees $GIT_USER ✔
-                //     echo "username=${GIT_USER}"    → Groovy expands to ""  ✘
+                // ── GROOVY vs SHELL INTERPOLATION (CRITICAL) ─────────────
+                //   Inside """...""", Groovy interpolates ${VAR} at PARSE TIME.
+                //   Variables injected by withCredentials (GIT_USER, GIT_TOKEN)
+                //   exist only in the SHELL environment — not in Groovy scope.
+                //   If written as ${GIT_USER}, Groovy resolves env.GIT_USER,
+                //   which is null, and renders it as the literal string "null".
+                //   The credential helper would output "username=null" → 401.
                 //
-                // GIT IDENTITY: --local scopes CI identity to this repo only.
-                // DIRECTORY SAFETY: mkdir -p guards first-run and deletion.
-                // IMAGE_TAG GUARD: exits early if IMAGE_TAG is empty to
-                //   prevent ArgoCD deploying a blank image tag.
+                //   Fix: escape the $ as \$ in the Groovy string:
+                //     \${GIT_USER}   → Groovy passes it through literally
+                //                   → shell receives $GIT_USER
+                //                   → shell expands from withCredentials env ✔
+                //
+                //   This escape rule applies to ALL shell-only variables inside
+                //   """...""" blocks: GIT_USER, GIT_TOKEN, and any other variable
+                //   set by withCredentials that is NOT in environment{}.
+                //
+                // ── IMAGE_TAG GUARD — NULL vs EMPTY ──────────────────────
+                //   The guard uses \${IMAGE_TAG} (escaped) so the SHELL evaluates
+                //   it at runtime. If written as ${IMAGE_TAG} (unescaped), Groovy
+                //   evaluates it at parse time — and if IMAGE_TAG was never set
+                //   (pipeline failed before Stage 3), env.IMAGE_TAG is null in
+                //   Groovy, which renders as the literal 4-character string "null".
+                //   The shell would then see:
+                //     if [ -z "null" ]; then   ← "null" is 4 chars, non-empty
+                //   The guard never fires and ArgoCD receives IMAGE_TAG=null.
+                //   With \${IMAGE_TAG}, the shell checks the actual runtime value.
+                //
+                // ── cd cd-repo FRAGILITY NOTE ─────────────────────────────
+                //   The `cd cd-repo` command works correctly here because all
+                //   subsequent git commands are in the SAME sh """...""" block,
+                //   which runs as a single subprocess. The cd persists for the
+                //   lifetime of that subprocess.
+                //   LATENT FRAGILITY: if this sh block is ever refactored into
+                //   multiple sh() calls, each call spawns a new subprocess and
+                //   the cd state is lost silently — causing git commands to run
+                //   against the wrong directory.
+                //   RECOMMENDED FUTURE REFACTOR: replace cd + sh block with
+                //   Jenkins dir('cd-repo') { sh '...' } blocks, which manage
+                //   the working directory at the Groovy/Jenkins level and are
+                //   safe across multiple sh() calls.
+                //
+                // ── GIT IDENTITY ─────────────────────────────────────────
+                //   --local scopes the CI user.email/user.name to this repo's
+                //   .git/config only — does not pollute the global git config
+                //   on the Jenkins agent.
                 // ────────────────────────────────────────────────────────────
                 stage('Update CD Repo') {
                     steps {
@@ -602,32 +728,41 @@ pipeline {
                             passwordVariable: 'GIT_TOKEN'
                         )]) {
                             sh """
-                                # Guard: abort early if IMAGE_TAG is empty.
-                                # Prevents committing IMAGE_TAG= (blank) which
-                                # would cause ArgoCD to deploy with no image tag.
-                                if [ -z "${IMAGE_TAG}" ]; then
+                                # ── IMAGE_TAG GUARD ──────────────────────────────────────
+                                # \${IMAGE_TAG} is intentionally escaped with \\ so the SHELL
+                                # evaluates it at runtime — NOT Groovy at parse time.
+                                # If unescaped and IMAGE_TAG is null (Stage 3 never ran),
+                                # Groovy renders null as the 4-char string "null", making
+                                # [ -z "null" ] false — the guard silently never fires and
+                                # ArgoCD receives IMAGE_TAG=null committed to the CD repo.
+                                if [ -z "\${IMAGE_TAG}" ]; then
                                     echo '❌ IMAGE_TAG is empty — aborting CD repo update'
                                     exit 1
                                 fi
 
                                 rm -rf cd-repo
+
+                                # Step 1: Clone with token in URL (git CLI requirement).
+                                # \${GIT_USER} / \${GIT_TOKEN} — escaped so shell expands
+                                # them from withCredentials env, not Groovy (see header note).
                                 git clone https://\${GIT_USER}:\${GIT_TOKEN}@github.com/ibtisam-iq/platform-engineering-systems.git cd-repo
 
                                 cd cd-repo
 
-                                # Step 1: Clear token-bearing URL immediately after clone.
+                                # Step 2: Clear token-bearing URL from .git/config immediately.
+                                # Without this, `git remote -v` would expose the PAT in logs.
                                 git remote set-url origin ""
 
-                                # Step 2: Restore bare HTTPS URL (no credentials).
-                                # Required so the credential helper below has a
-                                # valid remote to push to.
+                                # Step 3: Restore bare HTTPS URL — no credentials.
+                                # The credential helper (Step 4) requires a non-empty remote
+                                # URL to push to. An empty URL causes a fatal git error.
                                 git remote set-url origin "https://github.com/ibtisam-iq/platform-engineering-systems.git"
 
-                                # Scope CI identity to this repo only.
+                                # --local scopes identity to this repo's .git/config only.
                                 git config --local user.email "jenkins@ibtisam-iq.com"
                                 git config --local user.name  "Jenkins CI"
 
-                                # Ensure the target directory exists.
+                                # Ensure the target directory exists (first-run or after deletion).
                                 mkdir -p systems/java-monolith
 
                                 # Once K8s/Helm manifests exist, replace with:
@@ -639,12 +774,19 @@ pipeline {
                                 git add systems/java-monolith/image.env
                                 git commit -m "ci: update java-monolith image tag to ${IMAGE_TAG} [skip ci]" || echo "Nothing to commit"
 
-                                # Push via credential helper — token passed via stdin only,
-                                # never embedded in the remote URL or visible in any log.
-                                # \${GIT_USER} / \${GIT_TOKEN} — \$ escapes Groovy interpolation
-                                # so the shell receives the literal env var names and expands
-                                # them at runtime from the withCredentials environment.
-                                git -c credential.helper='!f() { echo "username=\${GIT_USER}"; echo "password=\${GIT_TOKEN}"; }; f' \\
+                                # Step 4: Push via credential helper.
+                                # Credentials are fed to git via stdin at push time only.
+                                # They are never stored in any file and never visible in logs.
+                                #
+                                # printf "%s\\n" is used instead of echo "..." because printf
+                                # with %s is immune to special characters in the value — if
+                                # GIT_USER or GIT_TOKEN contained \$, backtick, or ! in a
+                                # double-quoted echo context, output could be malformed.
+                                # GitHub PATs (ghp_...) don't contain these, but printf is
+                                # the defensive best practice.
+                                #
+                                # \${GIT_USER} / \${GIT_TOKEN} — escaped (see header note).
+                                git -c credential.helper='!f() { printf "username=%s\\n" "\${GIT_USER}"; printf "password=%s\\n" "\${GIT_TOKEN}"; }; f' \\
                                     push origin main
                             """
                         }
@@ -659,24 +801,27 @@ pipeline {
     // ────────────────────────────────────────────────────────────────────────
     // POST — Publishers, Cleanup & Notifications
     //
-    // ORDERING:
-    //   1. junit + recordCoverage — consume XML report files before
-    //      cleanWs() removes them.
-    //   2. docker rmi — guarded by if (env.IMAGE_TAG) to prevent
-    //      malformed commands if Versioning stage never ran.
-    //   3. docker image prune -f — removes dangling (<none>) image
-    //      layers left behind when a build is aborted mid-pipeline
-    //      by disableConcurrentBuilds(). Runs unconditionally so
-    //      even aborted builds are cleaned up on the next run.
-    //   4. cleanWs() — runs last, removes the entire workspace.
+    // ORDERING (intentional — do not reorder):
+    //   1. junit + recordCoverage — must consume XML report files BEFORE
+    //      cleanWs() removes them from the workspace. These are publisher
+    //      steps that read files, not script steps.
+    //   2. script{} block — contains:
+    //      a. Named docker rmi — guarded by if (env.IMAGE_TAG) to prevent
+    //         malformed `docker rmi name:null` if Stage 3 never ran.
+    //      b. docker image prune -f — removes dangling <none>:<none> layers
+    //         that accumulate when disableConcurrentBuilds(abortPrevious:true)
+    //         kills a build mid-pipeline before the rmi guard runs.
+    //         Grouped inside the same script{} block as docker rmi for
+    //         consistent style — all Docker cleanup in one place.
+    //   3. cleanWs() — always last, removes the entire workspace after all
+    //      publishers and cleanup have completed.
     // ────────────────────────────────────────────────────────────────────────
     post {
         always {
-            // ── 1. Test results
+            // ── 1. Test & coverage publishers (must run before cleanWs)
             junit testResults: "${APP_DIR}/target/surefire-reports/*.xml",
                   allowEmptyResults: true
 
-            // ── Code coverage
             recordCoverage(
                 tools: [[
                     parser: 'JACOCO',
@@ -685,7 +830,7 @@ pipeline {
                 sourceCodeRetention: 'EVERY_BUILD'
             )
 
-            // ── 2. Named image cleanup (only if IMAGE_TAG was set)
+            // ── 2. Docker cleanup — named rmi + dangling prune
             script {
                 if (env.IMAGE_TAG) {
                     echo '🧹 Cleaning up local Docker images...'
@@ -702,18 +847,19 @@ pipeline {
                 } else {
                     echo '⏭️  Skipping docker rmi — IMAGE_TAG not set (pipeline failed before Versioning stage).'
                 }
+
+                // Prune dangling (<none>:<none>) image layers.
+                // These accumulate when disableConcurrentBuilds(abortPrevious:true)
+                // kills a build mid-pipeline before named cleanup above runs.
+                // Runs unconditionally — even aborted builds are cleaned on next run.
+                // || true prevents a prune failure from marking the build unstable.
+                sh 'docker image prune -f || true'
             }
 
-            // ── 3. Dangling image prune
-            // Removes <none>:<none> image layers that accumulate when
-            // builds are aborted mid-pipeline by disableConcurrentBuilds().
-            // Runs unconditionally after every build so the agent's Docker
-            // daemon stays clean without needing a cron job.
-            sh 'docker image prune -f || true'
-
-            // ── 4. Workspace cleanup — always last
+            // ── 3. Workspace cleanup — always last
             cleanWs()
         }
+
         success {
             echo """
             ╔══════════════════════════════════════════════════════════╗
@@ -725,6 +871,7 @@ pipeline {
             ╚══════════════════════════════════════════════════════════╝
             """
         }
+
         failure {
             echo """
             ╔══════════════════════════════════════════════════════════╗
@@ -733,6 +880,7 @@ pipeline {
             ╚══════════════════════════════════════════════════════════╝
             """
         }
+
         unstable {
             echo '⚠️  Pipeline is UNSTABLE — test failures detected.'
         }
