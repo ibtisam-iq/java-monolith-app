@@ -5,7 +5,17 @@
 // Credentials: sonarqube-token · github-creds · docker-creds · nexus-creds · ghcr-creds
 // SonarQube server: sonar-server  |  Scanner: sonar-scanner
 // Maven settings:   maven-settings (Config File Provider)
-// ============================================================
+//
+// ── REQUIRED JENKINS PLUGINS ─────────────────────────────────
+// The following plugins MUST be installed for this pipeline to work:
+//   - Pipeline Maven Integration Plugin  → provides withMaven() DSL
+//     used in Build & Test, SonarQube Analysis, and Publish JAR stages.
+//     Without it, those stages fail with "No such DSL method withMaven".
+//   - SonarQube Scanner Plugin           → provides withSonarQubeEnv()
+//   - Coverage Plugin                    → provides recordCoverage() DSL
+//   - AnsiColor Plugin                   → provides ansiColor() option
+//   - Config File Provider Plugin        → provides globalMavenSettingsConfig
+// ─────────────────────────────────────────────────────────────
 //
 // ── MIGRATION NOTE ───────────────────────────────────────────
 // This Jenkinsfile was originally authored inside a separate
@@ -48,6 +58,17 @@ pipeline {
     environment {
         // ── App metadata (sourced from pom.xml values)
         APP_NAME       = 'java-monolith'
+
+        // ── APP_VERSION DRIFT WARNING ──────────────────────────────────────
+        // This value is hardcoded here and WILL drift if pom.xml version
+        // is ever bumped (e.g. 0.0.1-SNAPSHOT → 1.0.0-RELEASE).
+        // The GitHub Actions ci.yml reads this dynamically via:
+        //   mvn help:evaluate -Dexpression=project.version -q -DforceStdout
+        // If this value drifts from pom.xml, the Nexus artifact path will
+        // be correct but IMAGE_TAG will carry the wrong version prefix.
+        // TODO: Move APP_VERSION into the Versioning stage and compute it
+        //       dynamically from pom.xml the same way ci.yml does.
+        // ──────────────────────────────────────────────────────────────────
         APP_VERSION    = '0.0.1-SNAPSHOT'
         GROUP_ID       = 'com.ibtisamiq'
 
@@ -70,6 +91,11 @@ pipeline {
         // Image format: nexus.ibtisam-iq.com/docker-hosted/java-monolith:<tag>
         // Nexus repo must be created with "Path based routing" selected (not port-based).
         // Docker Bearer Token Realm must be active in Security → Realms.
+        //
+        // NEXUS_URL purpose: Nexus web UI link only — used in the success {} echo
+        // below so the console output shows a clickable URL to the Nexus UI.
+        // It is NOT used for docker login or docker push (those use NEXUS_DOCKER,
+        // which is the bare hostname without https:// as required by the Docker CLI).
         NEXUS_URL         = 'https://nexus.ibtisam-iq.com'
         NEXUS_DOCKER      = 'nexus.ibtisam-iq.com'       // host for docker login
         NEXUS_DOCKER_REPO = 'docker-hosted'              // repo name segment in URL path
@@ -155,8 +181,19 @@ pipeline {
         // Runs BEFORE build — fail-fast on secrets or
         // critical dependency CVEs before wasting build time.
         // --scanners secret,vuln,config covers all three.
-        // EXIT-CODE 1 on CRITICAL findings fails the build.
-        // Full report archived as trivy-fs-report.json.
+        //
+        // TWO-PASS STRATEGY:
+        //   Pass 1 — CRITICAL only, --exit-code 1 (NO || true)
+        //            → pipeline FAILS if any CRITICAL CVE found.
+        //              This is the enforcement gate. || true would
+        //              completely negate --exit-code 1 and silently
+        //              swallow the failure — never add it here.
+        //   Pass 2 — HIGH,MEDIUM, --exit-code 0
+        //            → advisory only, printed to console as a table.
+        //              || true is acceptable here because exit-code
+        //              is already 0 (non-blocking by design).
+        //
+        // Full CRITICAL report archived as trivy-fs-report.json.
         // ────────────────────────────────────────────────
         stage('Trivy Filesystem Scan') {
             steps {
@@ -170,7 +207,7 @@ pipeline {
                             --no-progress \\
                             --format json \\
                             --output trivy-fs-report.json \\
-                            . || true
+                            .
 
                         trivy fs \\
                             --scanners secret,vuln,config \\
@@ -288,7 +325,7 @@ pipeline {
         // STAGE 8 — Docker Build
         // Builds the multi-stage image defined in the app's
         // own Dockerfile (Stage1: maven:3.9-temurin-21-alpine,
-        // Stage2: eclipse-temurin:21-jre-alpine).
+        // Stage2: eclipse-temurin:21-jre-jammy).
         // Tags the image for ALL three registries in one build:
         //   - Docker Hub : mibtisam/java-monolith:<tag>
         //   - GHCR       : ghcr.io/ibtisam-iq/java-monolith:<tag>
@@ -323,7 +360,16 @@ pipeline {
         // STAGE 9 — Trivy Image Scan
         // Scans the freshly built image for CVEs BEFORE
         // pushing to any registry — fail-fast principle.
-        // EXIT-CODE 1 on CRITICAL findings fails the build.
+        //
+        // TWO-PASS STRATEGY (same rationale as Stage 2):
+        //   Pass 1 — CRITICAL only, --exit-code 1 (NO || true)
+        //            → pipeline FAILS if any CRITICAL CVE is found
+        //              in the final runtime image layers. Adding
+        //              || true here would silently swallow failures
+        //              and allow vulnerable images to be pushed.
+        //   Pass 2 — HIGH,MEDIUM,LOW, --exit-code 0
+        //            → advisory only, printed as a table to console.
+        //
         // Results archived as trivy-image-report.json.
         // ────────────────────────────────────────────────
         stage('Trivy Image Scan') {
@@ -336,7 +382,7 @@ pipeline {
                         --no-progress \\
                         --format json \\
                         --output trivy-image-report.json \\
-                        ${IMAGE_NAME}:${IMAGE_TAG} || true
+                        ${IMAGE_NAME}:${IMAGE_TAG}
 
                     trivy image \\
                         --exit-code 0 \\
@@ -484,6 +530,25 @@ pipeline {
         // CI → CD Handoff: commits the new image tag into
         // platform-engineering-systems so ArgoCD detects
         // the change and triggers deployment.
+        //
+        // SECURITY NOTE — git credentials handling:
+        //   The token is embedded in the clone URL as required by
+        //   the git CLI. To prevent it from persisting in .git/config
+        //   (where it would be visible via `git remote -v`), we
+        //   immediately unset the remote URL after cloning using
+        //   `git remote set-url origin ""`. This replaces the
+        //   token-bearing URL with an empty string before any
+        //   subsequent git operation reads or prints the config.
+        //   cleanWs() at the end of post { always } removes the
+        //   entire cd-repo directory, providing a second line of defence.
+        //
+        // GIT IDENTITY — --local vs --global:
+        //   git config --local is used instead of --global because
+        //   --global writes to ~/.gitconfig on the Jenkins agent OS,
+        //   which is shared across ALL pipelines running on the same
+        //   agent. --local writes only to cd-repo/.git/config and is
+        //   scoped entirely to this repository clone, preventing the
+        //   CI identity from bleeding into other pipeline builds.
         // ────────────────────────────────────────────────
         stage('Update CD Repo') {
             steps {
@@ -494,13 +559,19 @@ pipeline {
                     passwordVariable: 'GIT_TOKEN'
                 )]) {
                     sh """
-                        git config --global user.email "jenkins@ibtisam-iq.com"
-                        git config --global user.name  "Jenkins CI"
-
                         rm -rf cd-repo
                         git clone https://\${GIT_USER}:\${GIT_TOKEN}@github.com/ibtisam-iq/platform-engineering-systems.git cd-repo
 
                         cd cd-repo
+
+                        # Remove the token-bearing URL from .git/config immediately after
+                        # cloning so it cannot leak via `git remote -v` or log output.
+                        git remote set-url origin ""
+
+                        # Use --local so the CI identity is scoped to this repo only
+                        # and does not bleed into other pipelines on the same agent.
+                        git config --local user.email "jenkins@ibtisam-iq.com"
+                        git config --local user.name  "Jenkins CI"
 
                         # Once K8s/Helm manifests exist, replace the echo below with:
                         # sed -i "s|image: ibtisam-iq/java-monolith:.*|image: ibtisam-iq/java-monolith:${IMAGE_TAG}|g" \\
@@ -510,7 +581,10 @@ pipeline {
 
                         git add systems/java-monolith/image.env
                         git commit -m "ci: update java-monolith image tag to ${IMAGE_TAG} [skip ci]" || echo "Nothing to commit"
-                        git push origin main
+
+                        # Push using the token directly via the credential env vars
+                        # (remote URL was cleared above — re-supply inline for push only).
+                        git push https://\${GIT_USER}:\${GIT_TOKEN}@github.com/ibtisam-iq/platform-engineering-systems.git main
                     """
                 }
             }
@@ -524,10 +598,26 @@ pipeline {
     // junit and recordCoverage are Jenkins publisher steps.
     // Publishers MUST live here in the top-level post block —
     // they are NOT supported inside a stage-level post block.
+    //
+    // ORDERING RATIONALE:
+    //   1. junit + recordCoverage run FIRST — they consume the
+    //      XML report files from the workspace. They must complete
+    //      before cleanWs() removes the workspace.
+    //   2. docker rmi runs SECOND — cleans up local image layers
+    //      from the Jenkins agent's Docker daemon. Guarded with
+    //      if (env.IMAGE_TAG) so that if the pipeline failed before
+    //      Stage 3 (Versioning), IMAGE_TAG is empty and we skip the
+    //      docker rmi block entirely rather than running malformed
+    //      commands like `docker rmi java-monolith:` with no tag.
+    //   3. cleanWs() runs LAST — removes the entire workspace
+    //      including any leftover cd-repo directory. The separate
+    //      `rm -rf cd-repo` that previously appeared here was
+    //      redundant: cleanWs() already deletes everything under
+    //      the workspace root, including cd-repo.
     // ────────────────────────────────────────────────────
     post {
         always {
-            // ── Test results
+            // ── 1. Test results (publishers first, before workspace is wiped)
             //
             // PREVIOUS path (devsecops-pipelines repo with submodule):
             //   junit testResults: "pipelines/java-monolith/app/target/surefire-reports/*.xml"
@@ -552,21 +642,33 @@ pipeline {
                 sourceCodeRetention: 'EVERY_BUILD'
             )
 
-            // ── Docker image cleanup
+            // ── 2. Docker image cleanup
+            // Guarded with if (env.IMAGE_TAG) to prevent malformed
+            // `docker rmi image:` commands when the pipeline fails
+            // before Stage 3 (Versioning) and IMAGE_TAG was never set.
             // Nexus image tag uses path-based format: host/repo-name/image:tag
             // ECR lines stay commented until ECR_IMAGE is defined in environment {}
-            echo '🧹 Cleaning up local Docker images...'
-            sh """
-                docker rmi ${IMAGE_NAME}:${IMAGE_TAG}                                    || true
-                docker rmi ${IMAGE_NAME}:latest                                          || true
-                docker rmi ${GHCR_IMAGE}:${IMAGE_TAG}                                   || true
-                docker rmi ${GHCR_IMAGE}:latest                                         || true
-                docker rmi ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:${IMAGE_TAG} || true
-                docker rmi ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:latest       || true
-                # docker rmi \${ECR_IMAGE}:${IMAGE_TAG}                                 || true  (uncomment with ECR vars)
-                # docker rmi \${ECR_IMAGE}:latest                                       || true  (uncomment with ECR vars)
-            """
-            sh 'rm -rf cd-repo'
+            script {
+                if (env.IMAGE_TAG) {
+                    echo '🧹 Cleaning up local Docker images...'
+                    sh """
+                        docker rmi ${IMAGE_NAME}:${IMAGE_TAG}                                    || true
+                        docker rmi ${IMAGE_NAME}:latest                                          || true
+                        docker rmi ${GHCR_IMAGE}:${IMAGE_TAG}                                   || true
+                        docker rmi ${GHCR_IMAGE}:latest                                         || true
+                        docker rmi ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:${IMAGE_TAG} || true
+                        docker rmi ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:latest       || true
+                        # docker rmi \${ECR_IMAGE}:${IMAGE_TAG}                                 || true  (uncomment with ECR vars)
+                        # docker rmi \${ECR_IMAGE}:latest                                       || true  (uncomment with ECR vars)
+                    """
+                } else {
+                    echo '⏭️  Skipping docker rmi — IMAGE_TAG not set (pipeline failed before Versioning stage).'
+                }
+            }
+
+            // ── 3. Workspace cleanup — runs last, after publishers and docker rmi.
+            // Removes the entire workspace including any leftover cd-repo directory.
+            // No separate `rm -rf cd-repo` needed — cleanWs() handles everything.
             cleanWs()
         }
         success {
