@@ -56,10 +56,18 @@ on:
 permissions:
   contents: read
 
-# Cancel in-progress runs for the same branch (mirrors disableConcurrentBuilds)
+# Cancel in-progress runs for the same branch/ref.
+#
+# FIX R4#6: cancel-in-progress is scoped to pull_request builds only.
+# cancel-in-progress: true on push-to-main is dangerous: a second push landing
+# while the first run is mid-registry-push (Stages 11-13) would cancel it after
+# some layers are uploaded but before the manifest is committed — leaving a
+# corrupt or missing :latest tag in Docker Hub, GHCR, and Nexus.
+# PR builds have no write side-effects (no push to registries, no CD update)
+# so cancellation is safe and desirable there.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   # ── App metadata
@@ -90,6 +98,21 @@ env:
     -XX:+TieredCompilation
     -XX:TieredStopAtLevel=1
 
+  # ── Application server port
+  # FIX R4#4: Promoted from hardcoded build-arg to a named env var.
+  # 8000 is the port this application is configured to listen on (set in
+  # application.properties / application.yml). Change here if the app port
+  # changes — this is the single source of truth for the build-arg passed
+  # to Docker at build time.
+  APP_PORT: '8000'
+
+  # ── CD GitOps handoff (Stage 14)
+  # FIX R4#10: CD repo coordinates promoted from hardcoded shell to named
+  # env vars. Update here if the CD repo is renamed or the manifest path
+  # changes — no need to hunt through the Stage 14 shell script.
+  CD_REPO:          ibtisam-iq/platform-engineering-systems
+  CD_MANIFEST_PATH: systems/java-monolith/image.env
+
 jobs:
 
   # ════════════════════════════════════════════════════════════
@@ -101,10 +124,14 @@ jobs:
     timeout-minutes: 30
 
     permissions:
-      contents:      read        # checkout
-      packages:      write       # push to GHCR
-      pull-requests: write       # SonarQube PR decoration
-      checks:        write       # test reporter
+      contents:      read        # checkout (Stage 1)
+                                 # NOTE: Stage 14 writes to the CD repo via GIT_TOKEN PAT.
+                                 # PAT permissions are independent of GITHUB_TOKEN — do NOT
+                                 # elevate this to contents: write to fix a Stage 14 push error.
+                                 # If Stage 14 fails with permission denied, check GIT_TOKEN scope.
+      packages:      write       # push to GHCR (Stages 8, 12)
+      pull-requests: write       # SonarQube PR decoration (Stage 5)
+      checks:        write       # JUnit test reporter (Stage 4)
 
     outputs:
       image_tag: ${{ steps.versioning.outputs.image_tag }}
@@ -154,9 +181,11 @@ jobs:
           exit-code: '0'
           format:    table
 
+      # FIX R4#11: hashFiles guard — skip upload if the scan step errored
+      # before writing the file (avoids a confusing zero-byte artifact).
       - name: Upload Trivy FS report
         uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && hashFiles('trivy-fs-report.json') != ''
         with:
           name: trivy-fs-report
           path: trivy-fs-report.json
@@ -192,12 +221,17 @@ jobs:
       # NEVER use ${{ env.IMAGE_TAG }} for runtime-computed values —
       # the workflow-level env: block is parsed BEFORE any step runs,
       # so IMAGE_TAG would always resolve to empty string there.
+      #
+      # FIX R4#3: --short=7 pins the SHA abbreviation to exactly 7 characters.
+      # Without an explicit length, Git uses the minimum chars needed for
+      # uniqueness in the current repo — typically 7 today but silently grows
+      # to 8+ as the repo accumulates commits, changing the tag format over time.
       # ──────────────────────────────────────────────────────
       - name: Versioning — compute image tag
         id: versioning
         run: |
           APP_VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)
-          SHORT_SHA=$(git rev-parse --short HEAD)
+          SHORT_SHA=$(git rev-parse --short=7 HEAD)
           IMAGE_TAG="${APP_VERSION}-${SHORT_SHA}-${{ github.run_number }}"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
           echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_ENV"
@@ -269,9 +303,8 @@ jobs:
       # so ${GITHUB_WORKSPACE} (shell) and ${{ github.workspace }} (expression)
       # resolve to the same absolute path — no cross-job mismatch risk.
       #
-      # SHA-pinned to v1.2.0 (previous round fix) — same supply-chain
-      # rationale as Trivy. A semver tag can be force-pushed to a malicious
-      # commit; a SHA is immutable.
+      # SHA-pinned to v1.2.0 — same supply-chain rationale as Trivy.
+      # A semver tag can be force-pushed to a malicious commit; a SHA is immutable.
       #
       # timeout-minutes: 5 is a GitHub Actions STEP-LEVEL timeout — it kills
       # the step (not just the SonarQube poll) after 5 minutes. This is
@@ -293,6 +326,9 @@ jobs:
       # STAGE 7 — Publish JAR to Nexus
       # Guarded to main push only — prevents unmerged PR branch SNAPSHOTs
       # from polluting the Nexus snapshot repository.
+      # Implicitly depends on Quality Gate (Stage 6) passing: GHA prepends
+      # success() to any custom if: condition, so if Stage 6 fails or times
+      # out, this step is skipped automatically.
       # ──────────────────────────────────────────────────────
       - name: Publish JAR to Nexus
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -347,6 +383,9 @@ jobs:
       # build + scan the image (Stages 9-10) to catch CVEs before merge.
       # Only the push steps (Stages 11-13) are gated to main.
       #
+      # SERVER_PORT build-arg: uses APP_PORT from the top-level env: block.
+      # See env: block comment for why 8000 (matches application.properties).
+      #
       # image.created label: uses head_commit.timestamp (push events) with
       # fallback to run_started_at (workflow_dispatch and other trigger types
       # where head_commit is null). Both are RFC 3339 timestamps per OCI spec.
@@ -368,7 +407,7 @@ jobs:
             ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:${{ steps.versioning.outputs.image_tag }}
             ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest
           build-args: |
-            SERVER_PORT=8000
+            SERVER_PORT=${{ env.APP_PORT }}
           labels: |
             org.opencontainers.image.version=${{ steps.versioning.outputs.image_tag }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -385,12 +424,16 @@ jobs:
       #   Pass B — Library/JAR CVEs (your pom.xml)      → CRITICAL fails build
       #   Pass C — Full report (all types + severities)  → audit artifact only
       #
-      # Pass B has no if: always() — this is intentional. If Stage 9 (Docker
-      # build) fails, there is no image to scan; running trivy image against a
-      # non-existent image would produce a confusing "image not found" error
-      # on top of the real build failure. Pass B correctly skips when there is
-      # nothing to scan. Pass A cannot fail (exit-code: 0), so Pass B always
-      # runs when Stage 9 succeeds.
+      # Trivy image scan resolves tags against the local Docker daemon first
+      # (via Docker socket). Since Stage 9 uses load: true, the image is
+      # present locally under the exact tags specified — Trivy scans the
+      # just-built image, not any previously pushed remote version.
+      #
+      # Pass B has no if: always() — intentional. If Stage 9 (Docker build)
+      # fails, there is no image to scan; running trivy image against a
+      # non-existent image produces a misleading "image not found" error on
+      # top of the real build failure. Pass A cannot fail (exit-code: 0),
+      # so Pass B always runs when Stage 9 succeeds.
       # ──────────────────────────────────────────────────────
 
       # Pass A — OS packages: warn only (Canonical/vendor's responsibility)
@@ -481,10 +524,10 @@ jobs:
           docker push ${{ env.GHCR_IMAGE }}:$IMAGE_TAG
           docker push ${{ env.GHCR_IMAGE }}:latest
 
-      # ──────────────────────────────────────────────────────
+      # ───────────────────────────────────────────────═──────
       # STAGE 13 — Push to Nexus Docker Registry
       # (Same $IMAGE_TAG rationale and main-only guard as Stage 11.)
-      # ──────────────────────────────────────────────────────
+      # ───────────────────────────────────────────────═──────
       - name: Nexus — push image (path-based routing)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
@@ -512,46 +555,48 @@ jobs:
       # This is intentional: the CD repo must only be updated when the full
       # pipeline passes — not on PR builds or partial failures.
       #
-      # x-access-token clone URL — account-agnostic (no hardcoded username).
+      # CD_REPO and CD_MANIFEST_PATH from top-level env: block — update
+      # configuration there, not here in the shell.
       #
-      # git diff --cached --quiet guard (previous round fix):
-      #   Precisely detects "nothing staged" vs real commit errors.
-      #   `|| echo` suppressed ALL non-zero exits — this does not.
+      # FIX R4#2: Token kept off process argv.
+      #   Pattern: clone public URL → set-url with token → push.
+      #   `git clone https://x-access-token:${TOKEN}@...` embeds the token
+      #   in argv, visible to ps/proc scanners for the duration of the clone.
+      #   Setting the authenticated URL after clone via `git remote set-url`
+      #   never puts the token in a process argument — it writes to .git/config
+      #   (in-memory, not exposed to ps). After push, the token is cleared from
+      #   the remote URL so it is not present in the workspace at cleanup time.
       #
-      # git push origin HEAD (previous round fix):
-      #   HEAD is branch-rename resilient; hardcoded 'main' is not.
-      #
-      # R3 FIX #1: git push is now inside the commit arm — push only runs
-      #   when a commit was actually made. Previously git push ran after the
-      #   diff check unconditionally: if nothing was staged, the diff guard
-      #   short-circuited to echo (skipping commit) but git push still ran,
-      #   producing a pointless push of unmodified state that would fail with
-      #   a non-fast-forward error if the CD repo had diverged in the interim.
-      #
-      # git config --local (previous round fix):
-      #   Scopes identity to this repo's .git/config only; safe on self-hosted
-      #   runners where --global bleeds into concurrent jobs.
+      # git diff --cached --quiet + push inside commit arm: push only runs
+      #   when a commit was actually made (previous round fix).
+      # git config --local: identity scoped to this repo only (previous round).
+      # git push origin HEAD: branch-rename resilient (previous round).
       # ──────────────────────────────────────────────────────
       - name: Update CD repo — GitOps image tag handoff
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
         run: |
-          git clone https://x-access-token:${GIT_TOKEN}@github.com/ibtisam-iq/platform-engineering-systems.git cd-repo
+          # FIX R4#2: Clone with public URL — token never in process argv
+          git clone https://github.com/${CD_REPO}.git cd-repo
           cd cd-repo
+
+          # Set authenticated remote after clone — writes to .git/config, not argv
+          git remote set-url origin https://x-access-token:${GIT_TOKEN}@github.com/${CD_REPO}.git
 
           git config --local user.email "github-actions@ibtisam-iq.com"
           git config --local user.name  "GitHub Actions CI"
 
-          mkdir -p systems/java-monolith
-          echo "IMAGE_TAG=${IMAGE_TAG}" > systems/java-monolith/image.env
-          git add systems/java-monolith/image.env
+          mkdir -p "$(dirname "${CD_MANIFEST_PATH}")"
+          echo "IMAGE_TAG=${IMAGE_TAG}" > "${CD_MANIFEST_PATH}"
+          git add "${CD_MANIFEST_PATH}"
 
-          # R3 FIX #1: push is inside the commit arm — only runs when a commit
-          # was actually made. Nothing-to-commit path exits cleanly without push.
           git diff --cached --quiet \
             && echo "ℹ️  Nothing to commit — image tag unchanged" \
             || { git commit -m "ci: update java-monolith image tag to ${IMAGE_TAG} [skip ci]" && git push origin HEAD; }
+
+          # Clear token from remote URL after push — token not left in workspace
+          git remote set-url origin https://github.com/${CD_REPO}.git
 
       # ──────────────────────────────────────────────────────
       # Cleanup — remove local Docker images
