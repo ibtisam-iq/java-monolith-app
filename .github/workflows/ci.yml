@@ -27,6 +27,7 @@ on:
   push:
     branches: [main]
     paths-ignore:
+      - '.github/**'        # FIX #11: ci.yml-only changes no longer trigger a full pipeline run
       - 'Jenkinsfile'
       - 'README.md'
       - 'docs/**'
@@ -37,6 +38,7 @@ on:
   pull_request:
     branches: [main]
     paths-ignore:
+      - '.github/**'        # FIX #11: same for PR builds
       - 'Jenkinsfile'
       - 'README.md'
       - 'docs/**'
@@ -121,13 +123,12 @@ jobs:
       # misconfigs, and known CVEs in declared dependencies.
       # Two passes: CRITICAL (warn only) + HIGH/MEDIUM (warn only).
       # exit-code: '0' on both passes — filesystem scan is advisory;
-      # the hard security gate is on the built image (Stage 9, Pass B).
+      # the hard security gate is on the built image (Stage 10, Pass B).
+      # This matches the Jenkinsfile Stage 2 posture: both pipelines treat
+      # FS scan as informational and enforce the hard gate on the image.
       # See docs/trivy-troubleshooting.md for full rationale.
       # ──────────────────────────────────────────────────────
       - name: Trivy — filesystem scan (CRITICAL → warn only)
-        # FIX #4: pinned to commit SHA of v0.36.0 — prevents supply-chain
-        # tag-mutation attacks where a semver tag is force-pushed to a
-        # malicious commit. SHA is immutable; tag is not.
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
@@ -160,7 +161,7 @@ jobs:
       # ──────────────────────────────────────────────────────
       # Set up Java 21 + Maven dependency cache
       #
-      # FIX #2: Moved BEFORE the Versioning step.
+      # FIX #2 (previous round): Moved BEFORE the Versioning step.
       # The versioning step runs `mvn help:evaluate` to read the pom.xml
       # version at runtime. That command must execute under the guaranteed
       # temurin-21 JDK installed here — not the runner's default JDK, which
@@ -264,9 +265,13 @@ jobs:
       # Both this step and Stage 5 run in the same job on the same runner,
       # so ${GITHUB_WORKSPACE} (shell) and ${{ github.workspace }} (expression)
       # resolve to the same absolute path — no cross-job mismatch risk.
+      #
+      # FIX #6: Pinned to commit SHA of v1.2.0 — same supply-chain rationale
+      # as Trivy SHA pinning. A semver tag can be force-pushed to a malicious
+      # commit; a SHA is immutable.
       # ──────────────────────────────────────────────────────
       - name: SonarQube — Quality Gate check
-        uses: sonarsource/sonarqube-quality-gate-action@v1.2.0
+        uses: sonarsource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b # v1.2.0
         timeout-minutes: 5
         with:
           scanMetadataReportFile: ${{ github.workspace }}/.scannerwork/report-task.txt
@@ -276,8 +281,15 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 7 — Publish JAR to Nexus
+      #
+      # FIX #7: Guarded to main push only.
+      # Without this guard, every pull_request build deploys an unmerged
+      # PR branch SNAPSHOT JAR to the Nexus snapshot repository — polluting
+      # it with artifacts from branches that may never be merged. JAR
+      # publishing must only happen after the full pipeline passes on main.
       # ──────────────────────────────────────────────────────
       - name: Publish JAR to Nexus
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: mvn deploy -DskipTests -B --no-transfer-progress
 
       # ──────────────────────────────────────────────────────
@@ -285,6 +297,12 @@ jobs:
       # All three registry logins happen here so that the image
       # tag resolution and daemon availability are guaranteed
       # before docker build runs in the next step.
+      #
+      # NOTE: Logins are intentionally NOT gated to main-only.
+      # On PR builds, the login is required to pull cached layers
+      # from the registry for the BuildKit cache (cache-from: type=gha).
+      # Without login, authenticated cache pulls fail silently and the
+      # build falls back to a cold cache — significantly slower.
       # ──────────────────────────────────────────────────────
       - name: Docker Hub — login
         uses: docker/login-action@v3
@@ -309,15 +327,19 @@ jobs:
       # ──────────────────────────────────────────────────────
       # STAGE 9 — Docker Build
       # load: true  → image loaded into local daemon for Trivy scan (Stage 10)
-      # push: false → push happens AFTER Trivy passes (Stages 11-13)
+      # push: false → push happens AFTER Trivy passes (Stages 11-13), main only
       #
-      # FIX #6 — CONSTRAINT: load: true is INCOMPATIBLE with multi-platform
-      # builds. If you ever add `platforms: linux/amd64,linux/arm64`, Docker
-      # Buildx cannot load a multi-platform manifest into the local daemon and
-      # will error out. To enable multi-arch, you must either:
+      # CONSTRAINT: load: true is INCOMPATIBLE with multi-platform builds.
+      # If you ever add `platforms: linux/amd64,linux/arm64`, Docker Buildx
+      # cannot load a multi-platform manifest into the local daemon and will
+      # error out. To enable multi-arch, you must either:
       #   (a) build → push directly (remove load: true, set push: true), or
       #   (b) build amd64 only for the scan, then rebuild multi-arch for push.
       # Current setup: single-platform amd64 only — load: true works correctly.
+      #
+      # NOTE: Build is intentionally NOT gated to main-only — PR builds must
+      # build + scan the image (Stages 9-10) to catch CVEs before merge.
+      # Only the push steps (Stages 11-13) are gated to main.
       # ──────────────────────────────────────────────────────
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -412,7 +434,7 @@ jobs:
       # ──────────────────────────────────────────────────────
       # STAGE 11 — Push to Docker Hub
       #
-      # FIX #1 — WHY bare $IMAGE_TAG and NOT ${{ env.IMAGE_TAG }}:
+      # WHY bare $IMAGE_TAG and NOT ${{ env.IMAGE_TAG }}:
       # IMAGE_TAG is a runtime-computed value written to $GITHUB_ENV by the
       # versioning step. The ${{ env.IMAGE_TAG }} expression context is parsed
       # BEFORE any step runs — it would always resolve to empty string here.
@@ -420,26 +442,33 @@ jobs:
       # $GITHUB_ENV at step start) and correctly gets the versioning output.
       # Static env vars like IMAGE_NAME (set in the top-level env: block) are
       # safe to use with ${{ env.* }} because they are known at parse time.
+      #
+      # FIX #8: Guarded to main push only — images must not be pushed to
+      # any registry on pull_request builds. Build + scan (Stages 9-10) run
+      # on PRs to catch CVEs before merge; publishing does not.
       # ──────────────────────────────────────────────────────
       - name: Docker Hub — push image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           docker push ${{ env.IMAGE_NAME }}:$IMAGE_TAG
           docker push ${{ env.IMAGE_NAME }}:latest
 
       # ──────────────────────────────────────────────────────
       # STAGE 12 — Push to GitHub Container Registry (GHCR)
-      # (Same $IMAGE_TAG rationale as Stage 11 — see comment above.)
+      # (Same $IMAGE_TAG rationale and main-only guard as Stage 11.)
       # ──────────────────────────────────────────────────────
       - name: GHCR — push image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           docker push ${{ env.GHCR_IMAGE }}:$IMAGE_TAG
           docker push ${{ env.GHCR_IMAGE }}:latest
 
       # ──────────────────────────────────────────────────────
       # STAGE 13 — Push to Nexus Docker Registry
-      # (Same $IMAGE_TAG rationale as Stage 11 — see comment above.)
+      # (Same $IMAGE_TAG rationale and main-only guard as Stage 11.)
       # ──────────────────────────────────────────────────────
       - name: Nexus — push image (path-based routing)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           docker push ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:$IMAGE_TAG
           docker push ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest
@@ -450,6 +479,7 @@ jobs:
       # - name: AWS ECR — login
       #   uses: aws-actions/amazon-ecr-login@v2
       # - name: AWS ECR — tag and push
+      #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       #   run: |
       #     ECR_IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ env.APP_NAME }}"
       #     docker tag ${{ env.IMAGE_NAME }}:$IMAGE_TAG  "${ECR_IMAGE}:${IMAGE_TAG}"
@@ -464,29 +494,51 @@ jobs:
       # This is intentional: the CD repo must only be updated when the full
       # pipeline passes — not on PR builds or partial failures.
       #
-      # FIX #7 — Clone URL uses x-access-token pattern instead of hardcoded
-      # username. The previous form `ibtisam-iq:${GIT_TOKEN}` bound the clone
-      # to a specific account — if the PAT belongs to a different user, the
-      # repo is transferred to an org, or the username changes, the clone
-      # fails with 403. The x-access-token pattern is the standard GitHub
-      # HTTPS PAT auth form: username is literally "x-access-token" and the
-      # PAT is the password. It works for any PAT regardless of which account
-      # issued it, and is the pattern recommended in GitHub's own docs.
+      # FIX #7 (previous round): x-access-token clone URL — account-agnostic.
+      #
+      # FIX #1: `git diff --cached --quiet` guard replaces `|| echo`.
+      #   `|| echo "Nothing to commit"` suppresses ALL non-zero git commit
+      #   exits — not just "nothing staged." A detached HEAD, merge conflict,
+      #   or broken .git/config would silently pass and then surface as a
+      #   confusing non-fast-forward error on git push.
+      #   `git diff --cached --quiet` exits 0 if nothing staged (skip commit),
+      #   exits 1 if staged changes exist (run commit). This precisely isolates
+      #   "nothing staged" from a real commit failure. Same fix as Jenkinsfile.
+      #
+      # FIX #2: `git push origin HEAD` instead of hardcoded `main`.
+      #   HEAD always refers to the currently checked-out branch — resilient
+      #   to CD repo default branch renames. Same fix as Jenkinsfile.
+      #
+      # FIX #3: `git config --local` after `cd cd-repo`.
+      #   --global bleeds into other concurrent jobs on self-hosted runners
+      #   (you already run self-hosted runners for Jenkins; the same risk
+      #   applies if GHA ever uses self-hosted). --local scopes identity to
+      #   this repo's .git/config only. Same pattern as Jenkinsfile.
       # ──────────────────────────────────────────────────────
       - name: Update CD repo — GitOps image tag handoff
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
         run: |
-          git config --global user.email "github-actions@ibtisam-iq.com"
-          git config --global user.name  "GitHub Actions CI"
           git clone https://x-access-token:${GIT_TOKEN}@github.com/ibtisam-iq/platform-engineering-systems.git cd-repo
           cd cd-repo
+
+          # FIX #3: --local scopes identity to this repo only
+          git config --local user.email "github-actions@ibtisam-iq.com"
+          git config --local user.name  "GitHub Actions CI"
+
           mkdir -p systems/java-monolith
           echo "IMAGE_TAG=${IMAGE_TAG}" > systems/java-monolith/image.env
           git add systems/java-monolith/image.env
-          git commit -m "ci: update java-monolith image tag to ${IMAGE_TAG} [skip ci]" || echo "Nothing to commit"
-          git push origin main
+
+          # FIX #1: precise "nothing staged" detection — does NOT suppress
+          # real commit errors (detached HEAD, merge conflict, broken config).
+          git diff --cached --quiet \
+            && echo "ℹ️  Nothing to commit — image tag unchanged" \
+            || git commit -m "ci: update java-monolith image tag to ${IMAGE_TAG} [skip ci]"
+
+          # FIX #2: HEAD instead of hardcoded 'main' — branch-rename resilient
+          git push origin HEAD
 
       # ──────────────────────────────────────────────────────
       # Cleanup — remove local Docker images
@@ -497,10 +549,10 @@ jobs:
         run: |
           docker rmi ${{ env.IMAGE_NAME }}:$IMAGE_TAG                                                             || true
           docker rmi ${{ env.IMAGE_NAME }}:latest                                                                 || true
-          docker rmi ${{ env.GHCR_IMAGE }}:$IMAGE_TAG                                                             || true
+          docker rmi ${{ env.GHCR_IMAGE }}:$IMAGE_TAG                                                            || true
           docker rmi ${{ env.GHCR_IMAGE }}:latest                                                                 || true
-          docker rmi ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:$IMAGE_TAG          || true
-          docker rmi ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest              || true
+          docker rmi ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:$IMAGE_TAG         || true
+          docker rmi ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest             || true
 
       # ──────────────────────────────────────────────────────
       # Cleanup — remove cloned CD repo (if Stage 14 ran)
