@@ -27,7 +27,7 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - '.github/**'        # FIX #11: ci.yml-only changes no longer trigger a full pipeline run
+      - '.github/**'        # ci.yml-only post-merge changes don't need a full pipeline run
       - 'Jenkinsfile'
       - 'README.md'
       - 'docs/**'
@@ -37,8 +37,12 @@ on:
       - 'compose.yml'
   pull_request:
     branches: [main]
+    # NOTE: .github/** is intentionally NOT excluded here.
+    # A PR that only modifies ci.yml must still trigger CI so the workflow
+    # change is validated before merge. Excluding .github/** from pull_request
+    # paths-ignore would cause workflow-change PRs to merge blind with no
+    # pipeline validation — the exact opposite of what PRs are for.
     paths-ignore:
-      - '.github/**'        # FIX #11: same for PR builds
       - 'Jenkinsfile'
       - 'README.md'
       - 'docs/**'
@@ -161,14 +165,9 @@ jobs:
       # ──────────────────────────────────────────────────────
       # Set up Java 21 + Maven dependency cache
       #
-      # FIX #2 (previous round): Moved BEFORE the Versioning step.
-      # The versioning step runs `mvn help:evaluate` to read the pom.xml
-      # version at runtime. That command must execute under the guaranteed
-      # temurin-21 JDK installed here — not the runner's default JDK, which
-      # may differ across ubuntu-24.04 image refreshes. Placing setup-java
-      # after versioning was a silent ordering bug: it worked only because
-      # ubuntu-24.04 happened to ship OpenJDK 21, but temurin is not
-      # pre-installed and JAVA_HOME is not guaranteed to point to Java 21.
+      # Moved BEFORE the Versioning step (previous round fix).
+      # The versioning step runs `mvn help:evaluate` which requires the
+      # temurin-21 JDK installed here — not the runner's default JDK.
       # ──────────────────────────────────────────────────────
       - name: Set up Java ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
@@ -219,6 +218,10 @@ jobs:
       # ──────────────────────────────────────────────────────
       # STAGE 4 — Build & Test
       # mvn clean verify: compile → test → JaCoCo → package
+      # The build step itself fails on test failure (Surefire exits non-zero).
+      # The JUnit reporter below runs with if: always() as a reporting step
+      # AFTER the build — fail_on_failure: false prevents a redundant double
+      # failure signal from the reporter on top of the already-failed build.
       # ──────────────────────────────────────────────────────
       - name: Build & Test — mvn clean verify
         run: mvn clean verify -B --no-transfer-progress
@@ -266,9 +269,16 @@ jobs:
       # so ${GITHUB_WORKSPACE} (shell) and ${{ github.workspace }} (expression)
       # resolve to the same absolute path — no cross-job mismatch risk.
       #
-      # FIX #6: Pinned to commit SHA of v1.2.0 — same supply-chain rationale
-      # as Trivy SHA pinning. A semver tag can be force-pushed to a malicious
+      # SHA-pinned to v1.2.0 (previous round fix) — same supply-chain
+      # rationale as Trivy. A semver tag can be force-pushed to a malicious
       # commit; a SHA is immutable.
+      #
+      # timeout-minutes: 5 is a GitHub Actions STEP-LEVEL timeout — it kills
+      # the step (not just the SonarQube poll) after 5 minutes. This is
+      # intentional for BankApp: SonarQube analysis on this small codebase
+      # completes in under 2 minutes in practice. If you scale to a larger
+      # project where analysis takes longer, increase this value accordingly.
+      # A timeout here surfaces as "step timed out", not "quality gate failed".
       # ──────────────────────────────────────────────────────
       - name: SonarQube — Quality Gate check
         uses: sonarsource/sonarqube-quality-gate-action@cf038b0e0cdecfa9e56c198bbb7d21d751d62c3b # v1.2.0
@@ -281,12 +291,8 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 7 — Publish JAR to Nexus
-      #
-      # FIX #7: Guarded to main push only.
-      # Without this guard, every pull_request build deploys an unmerged
-      # PR branch SNAPSHOT JAR to the Nexus snapshot repository — polluting
-      # it with artifacts from branches that may never be merged. JAR
-      # publishing must only happen after the full pipeline passes on main.
+      # Guarded to main push only — prevents unmerged PR branch SNAPSHOTs
+      # from polluting the Nexus snapshot repository.
       # ──────────────────────────────────────────────────────
       - name: Publish JAR to Nexus
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -340,6 +346,10 @@ jobs:
       # NOTE: Build is intentionally NOT gated to main-only — PR builds must
       # build + scan the image (Stages 9-10) to catch CVEs before merge.
       # Only the push steps (Stages 11-13) are gated to main.
+      #
+      # image.created label: uses head_commit.timestamp (push events) with
+      # fallback to run_started_at (workflow_dispatch and other trigger types
+      # where head_commit is null). Both are RFC 3339 timestamps per OCI spec.
       # ──────────────────────────────────────────────────────
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -362,7 +372,7 @@ jobs:
           labels: |
             org.opencontainers.image.version=${{ steps.versioning.outputs.image_tag }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp || github.run_started_at }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
           cache-from: type=gha
           cache-to:   type=gha,mode=max
@@ -374,6 +384,13 @@ jobs:
       #   Pass A — OS packages (vendor's responsibility) → warn only
       #   Pass B — Library/JAR CVEs (your pom.xml)      → CRITICAL fails build
       #   Pass C — Full report (all types + severities)  → audit artifact only
+      #
+      # Pass B has no if: always() — this is intentional. If Stage 9 (Docker
+      # build) fails, there is no image to scan; running trivy image against a
+      # non-existent image would produce a confusing "image not found" error
+      # on top of the real build failure. Pass B correctly skips when there is
+      # nothing to scan. Pass A cannot fail (exit-code: 0), so Pass B always
+      # runs when Stage 9 succeeds.
       # ──────────────────────────────────────────────────────
 
       # Pass A — OS packages: warn only (Canonical/vendor's responsibility)
@@ -389,6 +406,7 @@ jobs:
 
       # Pass B — Library (JAR) CRITICALs: FAIL the build
       # These are YOUR dependencies in pom.xml. Fix = bump version.
+      # No if: always() — intentional. See Stage 10 header comment above.
       - name: Trivy — image scan JAR/library (CRITICAL → fail)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
@@ -443,9 +461,9 @@ jobs:
       # Static env vars like IMAGE_NAME (set in the top-level env: block) are
       # safe to use with ${{ env.* }} because they are known at parse time.
       #
-      # FIX #8: Guarded to main push only — images must not be pushed to
-      # any registry on pull_request builds. Build + scan (Stages 9-10) run
-      # on PRs to catch CVEs before merge; publishing does not.
+      # Guarded to main push only — images must not be pushed to any registry
+      # on pull_request builds. Build + scan (Stages 9-10) run on PRs to catch
+      # CVEs before merge; publishing does not.
       # ──────────────────────────────────────────────────────
       - name: Docker Hub — push image
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -494,26 +512,25 @@ jobs:
       # This is intentional: the CD repo must only be updated when the full
       # pipeline passes — not on PR builds or partial failures.
       #
-      # FIX #7 (previous round): x-access-token clone URL — account-agnostic.
+      # x-access-token clone URL — account-agnostic (no hardcoded username).
       #
-      # FIX #1: `git diff --cached --quiet` guard replaces `|| echo`.
-      #   `|| echo "Nothing to commit"` suppresses ALL non-zero git commit
-      #   exits — not just "nothing staged." A detached HEAD, merge conflict,
-      #   or broken .git/config would silently pass and then surface as a
-      #   confusing non-fast-forward error on git push.
-      #   `git diff --cached --quiet` exits 0 if nothing staged (skip commit),
-      #   exits 1 if staged changes exist (run commit). This precisely isolates
-      #   "nothing staged" from a real commit failure. Same fix as Jenkinsfile.
+      # git diff --cached --quiet guard (previous round fix):
+      #   Precisely detects "nothing staged" vs real commit errors.
+      #   `|| echo` suppressed ALL non-zero exits — this does not.
       #
-      # FIX #2: `git push origin HEAD` instead of hardcoded `main`.
-      #   HEAD always refers to the currently checked-out branch — resilient
-      #   to CD repo default branch renames. Same fix as Jenkinsfile.
+      # git push origin HEAD (previous round fix):
+      #   HEAD is branch-rename resilient; hardcoded 'main' is not.
       #
-      # FIX #3: `git config --local` after `cd cd-repo`.
-      #   --global bleeds into other concurrent jobs on self-hosted runners
-      #   (you already run self-hosted runners for Jenkins; the same risk
-      #   applies if GHA ever uses self-hosted). --local scopes identity to
-      #   this repo's .git/config only. Same pattern as Jenkinsfile.
+      # R3 FIX #1: git push is now inside the commit arm — push only runs
+      #   when a commit was actually made. Previously git push ran after the
+      #   diff check unconditionally: if nothing was staged, the diff guard
+      #   short-circuited to echo (skipping commit) but git push still ran,
+      #   producing a pointless push of unmodified state that would fail with
+      #   a non-fast-forward error if the CD repo had diverged in the interim.
+      #
+      # git config --local (previous round fix):
+      #   Scopes identity to this repo's .git/config only; safe on self-hosted
+      #   runners where --global bleeds into concurrent jobs.
       # ──────────────────────────────────────────────────────
       - name: Update CD repo — GitOps image tag handoff
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -523,7 +540,6 @@ jobs:
           git clone https://x-access-token:${GIT_TOKEN}@github.com/ibtisam-iq/platform-engineering-systems.git cd-repo
           cd cd-repo
 
-          # FIX #3: --local scopes identity to this repo only
           git config --local user.email "github-actions@ibtisam-iq.com"
           git config --local user.name  "GitHub Actions CI"
 
@@ -531,14 +547,11 @@ jobs:
           echo "IMAGE_TAG=${IMAGE_TAG}" > systems/java-monolith/image.env
           git add systems/java-monolith/image.env
 
-          # FIX #1: precise "nothing staged" detection — does NOT suppress
-          # real commit errors (detached HEAD, merge conflict, broken config).
+          # R3 FIX #1: push is inside the commit arm — only runs when a commit
+          # was actually made. Nothing-to-commit path exits cleanly without push.
           git diff --cached --quiet \
             && echo "ℹ️  Nothing to commit — image tag unchanged" \
-            || git commit -m "ci: update java-monolith image tag to ${IMAGE_TAG} [skip ci]"
-
-          # FIX #2: HEAD instead of hardcoded 'main' — branch-rename resilient
-          git push origin HEAD
+            || { git commit -m "ci: update java-monolith image tag to ${IMAGE_TAG} [skip ci]" && git push origin HEAD; }
 
       # ──────────────────────────────────────────────────────
       # Cleanup — remove local Docker images
@@ -557,6 +570,7 @@ jobs:
       # ──────────────────────────────────────────────────────
       # Cleanup — remove cloned CD repo (if Stage 14 ran)
       # Separated from image cleanup — these are different concerns.
+      # rm -rf on a non-existent path exits 0 — safe as a no-op on PR builds.
       # ──────────────────────────────────────────────────────
       - name: Cleanup — remove cloned CD repo workspace
         if: always()
