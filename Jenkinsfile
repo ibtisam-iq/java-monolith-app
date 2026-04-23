@@ -201,7 +201,7 @@ pipeline {
                     echo '🔎 Running Trivy filesystem scan on source tree...'
                     sh """
                         trivy fs \\
-                            --scanners secret,vuln,config \\
+                            --scanners secret,vuln,misconfig \\
                             --exit-code 1 \\
                             --severity CRITICAL \\
                             --no-progress \\
@@ -210,7 +210,7 @@ pipeline {
                             .
 
                         trivy fs \\
-                            --scanners secret,vuln,config \\
+                            --scanners secret,vuln,misconfig \\
                             --exit-code 0 \\
                             --severity HIGH,MEDIUM \\
                             --no-progress \\
@@ -654,12 +654,12 @@ pipeline {
                     sh """
                         docker rmi ${IMAGE_NAME}:${IMAGE_TAG}                                    || true
                         docker rmi ${IMAGE_NAME}:latest                                          || true
-                        docker rmi ${GHCR_IMAGE}:${IMAGE_TAG}                                   || true
-                        docker rmi ${GHCR_IMAGE}:latest                                         || true
+                        docker rmi ${GHCR_IMAGE}:${IMAGE_TAG}                                    || true
+                        docker rmi ${GHCR_IMAGE}:latest                                          || true
                         docker rmi ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:${IMAGE_TAG} || true
                         docker rmi ${NEXUS_DOCKER}/${NEXUS_DOCKER_REPO}/${APP_NAME}:latest       || true
-                        # docker rmi \${ECR_IMAGE}:${IMAGE_TAG}                                 || true  (uncomment with ECR vars)
-                        # docker rmi \${ECR_IMAGE}:latest                                       || true  (uncomment with ECR vars)
+                        # docker rmi \${ECR_IMAGE}:${IMAGE_TAG}                                  || true  (uncomment with ECR vars)
+                        # docker rmi \${ECR_IMAGE}:latest                                        || true  (uncomment with ECR vars)
                     """
                 } else {
                     echo '⏭️  Skipping docker rmi — IMAGE_TAG not set (pipeline failed before Versioning stage).'
@@ -675,8 +675,8 @@ pipeline {
             echo """
             ╔══════════════════════════════════════════════════════════╗
             ║  ✅  PIPELINE SUCCEEDED                                  ║
-            ║  Image    : ${IMAGE_NAME}:${IMAGE_TAG}
-            ║  GHCR     : ${GHCR_IMAGE}:${IMAGE_TAG}
+            ║  Image    : ${IMAGE_NAME}:${IMAGE_TAG}                   ║
+            ║  GHCR     : ${GHCR_IMAGE}:${IMAGE_TAG}                   ║
             ║  Nexus    : ${NEXUS_URL}                                 ║
             ╚══════════════════════════════════════════════════════════╝
             """
