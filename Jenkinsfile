@@ -772,11 +772,14 @@ pipeline {
                                 # sed -i "s|image: ibtisam-iq/java-monolith:.*|image: ibtisam-iq/java-monolith:\${IMAGE_TAG}|g" \\
                                 #     deployments/java-monolith/deployment.yaml
 
-                                # FIX #1 — \${IMAGE_TAG} escaped so shell evaluates at runtime.
-                                # Unescaped ${IMAGE_TAG} interpolated by Groovy at parse time;
-                                # if Stage 3 never ran, env.IMAGE_TAG is null → writes
-                                # "IMAGE_TAG=null" into image.env → ArgoCD deploys tag "null".
-                                echo "IMAGE_TAG=\${IMAGE_TAG}" > systems/java-monolith/image.env
+                                echo "=== Writing new manifest ==="
+                                cat > systems/java-monolith/image.env << EOF
+IMAGE_TAG=${IMAGE_TAG}
+UPDATED_AT=\$(date -u +%Y-%m-%dT%H:%M:%SZ)
+UPDATED_BY=jenkins-build-${BUILD_NUMBER}
+GIT_COMMIT=${GIT_COMMIT}
+GIT_BRANCH=${GIT_BRANCH}
+EOF
 
                                 git add systems/java-monolith/image.env
 
