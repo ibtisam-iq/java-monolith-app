@@ -589,6 +589,10 @@ jobs:
 
           mkdir -p "$(dirname "${CD_MANIFEST_PATH}")"
 
+          # Once K8s/Helm manifests exist, replace with:
+          # sed -i "s|image: mibtisam/java-monolith:.*|image: mibtisam/java-monolith:${IMAGE_TAG}|g" \
+          #     deployments/java-monolith/deployment.yaml
+
           echo "=== Current manifest ==="
           cat ${CD_MANIFEST_PATH} 2>/dev/null || echo "(file does not exist yet)"
 
