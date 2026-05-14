@@ -324,24 +324,29 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 7 — Publish JAR to Nexus
-      # Guarded to main push only — prevents unmerged PR branch SNAPSHOTs
+      # Guarded to main branch only — prevents unmerged PR branch SNAPSHOTs
       # from polluting the Nexus snapshot repository.
+      # workflow_dispatch is included so manual pipeline runs from main also
+      # publish — useful for re-deploying or debugging without a dummy commit.
       # Implicitly depends on Quality Gate (Stage 6) passing: GHA prepends
       # success() to any custom if: condition, so if Stage 6 fails or times
       # out, this step is skipped automatically.
       # ──────────────────────────────────────────────────────
       - name: Publish JAR to Nexus
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: mvn deploy -DskipTests -B --no-transfer-progress
 
       # ──────────────────────────────────────────────────────
       # STAGE 7b — Upload JAR to GitHub Actions Artifacts
-      # Runs on main push only (same guard as Stage 7 / Nexus publish).
+      # Same guard as Stage 7 (Nexus publish) — both artifact destinations
+      # are updated together on main push or manual workflow_dispatch.
       # The JAR is produced by mvn clean verify (Stage 4) and lives at
-      # target/*.jar. retention-days: 14 keeps artifact costs manageable.
+      # target/*.jar. retention-days: 14 keeps artifact storage costs manageable.
+      # if-no-files-found: error — fails loudly if Maven didn't produce a JAR
+      # rather than silently uploading an empty artifact.
       # ──────────────────────────────────────────────────────
       - name: Upload JAR — GitHub Actions artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: java-monolith-${{ steps.versioning.outputs.image_tag }}
@@ -519,32 +524,35 @@ jobs:
       # Static env vars like IMAGE_NAME (set in the top-level env: block) are
       # safe to use with ${{ env.* }} because they are known at parse time.
       #
-      # Guarded to main push only — images must not be pushed to any registry
-      # on pull_request builds. Build + scan (Stages 9-10) run on PRs to catch
-      # CVEs before merge; publishing does not.
+      # Guarded to main branch (push or workflow_dispatch) only — images must
+      # not be pushed to any registry on pull_request builds. Build + scan
+      # (Stages 9-10) run on PRs to catch CVEs before merge; publishing does not.
+      # workflow_dispatch allows manual re-publish from main without a dummy commit.
       # ──────────────────────────────────────────────────────
       - name: Docker Hub — push image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: |
           docker push ${{ env.IMAGE_NAME }}:$IMAGE_TAG
           docker push ${{ env.IMAGE_NAME }}:latest
 
       # ──────────────────────────────────────────────────────
       # STAGE 12 — Push to GitHub Container Registry (GHCR)
-      # (Same $IMAGE_TAG rationale and main-only guard as Stage 11.)
+      # (Same $IMAGE_TAG rationale and main-only guard as Stage 11.
+      #  workflow_dispatch included for same reason — see Stage 11 comment.)
       # ──────────────────────────────────────────────────────
       - name: GHCR — push image
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: |
           docker push ${{ env.GHCR_IMAGE }}:$IMAGE_TAG
           docker push ${{ env.GHCR_IMAGE }}:latest
 
       # ───────────────────────────────────────────────═──────
       # STAGE 13 — Push to Nexus Docker Registry
-      # (Same $IMAGE_TAG rationale and main-only guard as Stage 11.)
+      # (Same $IMAGE_TAG rationale and main-only guard as Stage 11.
+      #  workflow_dispatch included for same reason — see Stage 11 comment.)
       # ───────────────────────────────────────────────═──────
       - name: Nexus — push image (path-based routing)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: |
           docker push ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:$IMAGE_TAG
           docker push ${{ env.NEXUS_DOCKER }}/${{ env.NEXUS_DOCKER_REPO }}/${{ env.APP_NAME }}:latest
@@ -555,7 +563,7 @@ jobs:
       # - name: AWS ECR — login
       #   uses: aws-actions/amazon-ecr-login@v2
       # - name: AWS ECR — tag and push
-      #   if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      #   if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
       #   run: |
       #     ECR_IMAGE="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/${{ env.APP_NAME }}"
       #     docker tag ${{ env.IMAGE_NAME }}:$IMAGE_TAG  "${ECR_IMAGE}:${IMAGE_TAG}"
@@ -565,10 +573,13 @@ jobs:
 
       # ──────────────────────────────────────────────────────
       # STAGE 14 — Update CD Repo (GitOps handoff)
-      # Runs only on push to main AND only if all prior steps succeeded
-      # (success() is the implicit default when no status function is given).
+      # Runs on push to main OR manual workflow_dispatch from main, AND only
+      # if all prior steps succeeded (success() is the implicit default when
+      # no status function is given).
       # This is intentional: the CD repo must only be updated when the full
       # pipeline passes — not on PR builds or partial failures.
+      # workflow_dispatch allows re-triggering the GitOps handoff manually
+      # (e.g. after a failed CD deploy) without pushing a dummy commit.
       #
       # CD_REPO and CD_MANIFEST_PATH from top-level env: block — update
       # configuration there, not here in the shell.
@@ -588,7 +599,7 @@ jobs:
       # git push origin HEAD: branch-rename resilient (previous round).
       # ──────────────────────────────────────────────────────
       - name: Update CD repo — GitOps image tag handoff
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         env:
           GIT_TOKEN: ${{ secrets.GIT_TOKEN }}
         run: |
