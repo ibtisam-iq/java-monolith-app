@@ -335,6 +335,21 @@ jobs:
         run: mvn deploy -DskipTests -B --no-transfer-progress
 
       # ──────────────────────────────────────────────────────
+      # STAGE 7b — Upload JAR to GitHub Actions Artifacts
+      # Runs on main push only (same guard as Stage 7 / Nexus publish).
+      # The JAR is produced by mvn clean verify (Stage 4) and lives at
+      # target/*.jar. retention-days: 14 keeps artifact costs manageable.
+      # ──────────────────────────────────────────────────────
+      - name: Upload JAR — GitHub Actions artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-monolith-${{ steps.versioning.outputs.image_tag }}
+          path: target/*.jar
+          if-no-files-found: error
+          retention-days: 14
+
+      # ──────────────────────────────────────────────────────
       # STAGE 8 — Registry Logins (BEFORE build)
       # All three registry logins happen here so that the image
       # tag resolution and daemon availability are guaranteed
