@@ -248,11 +248,17 @@ nexus.ibtisam-iq.com/docker-hosted/java-monolith:latest   88a727976b14        62
 
 ### Step 5 — Platform Engineering (Deployment & Operations)
 
-Once the artifact was ready, I deployed it using multiple industry-standard approaches.
+With a production-grade artifact in the registry, the next challenge was deploying it — not just once, but across multiple environments using different industry-standard strategies. This is where infrastructure expertise matters as much as pipeline skills.
 
-Deployment targets: Local JAR · Docker Compose · AWS EC2 · EKS (Kubernetes) · Terraform-provisioned infrastructure.
+I deployed the same application image using three distinct approaches:
 
-Also covered: monitoring, observability, scaling strategies, and system reliability.
+| # | Method | Environment | Tooling |
+|---|--------|-------------|---------|
+| 1 | Kubernetes (bare-metal) | Self-hosted kubeadm cluster | kubectl + Kustomize |
+| 2 | Kubernetes (managed) | Amazon EKS | eksctl + kubectl + Kustomize |
+| 3 | EC2 (containerless) | AWS EC2 via Launch Template + ASG | AWS CLI + systemd |
+
+Each method is independently documented — setup, manifests, commands, and validation — in the dedicated platform repository below.
 
 👉 **Platform repository:** [Platform Engineering Systems](https://github.com/ibtisam-iq/platform-engineering-systems/tree/main/systems/java-monolith)
 
@@ -267,4 +273,5 @@ Also covered: monitoring, observability, scaling strategies, and system reliabil
 | **This repo** | Application source code + all CI/CD pipeline definitions (Jenkins, GitHub Actions) |
 | **[Platform Engineering Systems](https://github.com/ibtisam-iq/platform-engineering-systems)** | Platform — deploys, operates, and scales the artifact across multiple targets |
 
-This separation is intentional: pipeline logic lives with the code it builds, and deployment configs stay independently versioned in their own repo.
+> The separation is intentional: CI/CD logic lives here with the code it builds.  
+> Deployment configs are independently versioned where they belong — in the platform layer.
