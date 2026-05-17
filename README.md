@@ -73,6 +73,8 @@ Before doing any DevOps work, I audited and modernized `pom.xml` — upgrading t
 
 > I used AI-assisted analysis (Perplexity Pro) for this step. Full change log with rationale: [`docs/pom-modernization.md`](docs/pom-modernization.md)
 
+> During the AWS EC2 bare-metal deployment, two ALB-related issues were encountered and resolved — a health check failure caused by Spring Security blocking `/actuator/health`, and an HTTPS login redirect loop caused by SSL termination at the ALB layer. Full diagnosis and fixes: [`docs/alb-troubleshooting.md`](docs/alb-troubleshooting.md)
+
 ---
 
 ### Step 1 — Environment Standardization
