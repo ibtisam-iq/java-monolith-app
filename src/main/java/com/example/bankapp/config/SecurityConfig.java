@@ -29,6 +29,12 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(authz -> authz
                         .requestMatchers("/register").permitAll()
+                        // ALB health check fix: permit /actuator/health without authentication.
+                        // Spring Security was returning 302 → login redirect for unauthenticated
+                        // requests, causing the ALB to mark instances as unhealthy.
+                        // This rule must appear BEFORE anyRequest().authenticated() — Spring
+                        // Security evaluates matchers top-to-bottom and stops at the first match.
+                        .requestMatchers("/actuator/health").permitAll()
                         .anyRequest().authenticated()
                 )
                 .formLogin(form -> form
